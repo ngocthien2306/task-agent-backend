@@ -182,7 +182,8 @@ const processBackgroundJobs = async () => {
       const result = await sendToPythonAPI(
         job.userInput, 
         job.aiResponse, 
-        job.sessionId
+        job.sessionId,
+        job.userId
       );
 
       if (result.success) {
@@ -320,7 +321,7 @@ OUTPUT: {
     {
       "text": "Chào bạn! Tôi hiểu feeling stress với deadline rất khó chịu. Bạn muốn share thêm về deadline nào đang làm bạn lo?",
       "facialExpression": "concerned",
-      "animation": "Thinking"
+      "animation": "Thinking_0"
     }
   ],
   "taskAction": {"action": "none"},
@@ -372,7 +373,7 @@ OUTPUT: {
     {
       "text": "Perfect! Tôi thấy bạn có 1 fixed meeting và 4 flexible tasks. Để tôi optimize schedule cho bạn!",
       "facialExpression": "excited",
-      "animation": "Thinking"
+      "animation": "Thinking_0"
     },
     {
       "text": "Suggest: 9h prep meeting, 10h team meeting, 11h-12h calls, 14h-17h focus báo cáo. Sounds good?",
@@ -449,8 +450,9 @@ const sessions = new Map(); // Store conversation history for each user
 app.post("/chat", async (req, res) => {
   const userMessage = req.body.message;
   const sessionId = req.body.sessionId || 'default';
+  const userId = req.body.user_id || 'anonymous';
   
-  console.log(`💬 New chat request from session: ${sessionId}`);
+  console.log(`💬 New chat request from user: ${userId}, session: ${sessionId}`);
   console.log(`📝 User message: ${userMessage}`);
   
   // Initialize session if doesn't exist
@@ -496,7 +498,7 @@ app.post("/chat", async (req, res) => {
         audio: await audioFileToBase64("audios/api_0.wav"),
         lipsync: await readJsonTranscript("audios/api_0.json"),
         facialExpression: "concerned",
-        animation: "Thinking",
+        animation: "Thinking_0",
       },
       {
         text: "Don't worry, once you add the key, I'll be ready to help with all your work tasks!",
@@ -586,7 +588,7 @@ app.post("/chat", async (req, res) => {
       userInput: userMessage,
       aiResponse: parsedResponse,
       sessionId: sessionId,
-      userId: sessionId.split('_')[0] || 'anonymous', // Extract userId from sessionId if possible
+      userId: userId,
       messageCount: messages.length
     });
 
@@ -610,7 +612,7 @@ app.post("/chat", async (req, res) => {
       {
         text: "Sorry, tôi đang gặp một chút vấn đề technical. Bạn có thể thử lại không?",
         facialExpression: "concerned",
-        animation: "Thinking",
+        animation: "Thinking_0",
       }
     ];
 
