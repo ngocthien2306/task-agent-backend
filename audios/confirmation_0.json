@@ -1,28 +1,30 @@
 {
   "metadata": {
     "soundFile": "/Users/ngocthien.ai/Source/Projects/3d_avartar/task-agent-backend/audios/confirmation_0.wav",
-    "duration": 3.02
+    "duration": 3.28
   },
   "mouthCues": [
-    { "start": 0.00, "end": 0.04, "value": "X" },
-    { "start": 0.04, "end": 0.18, "value": "C" },
-    { "start": 0.18, "end": 0.25, "value": "B" },
-    { "start": 0.25, "end": 0.33, "value": "A" },
-    { "start": 0.33, "end": 0.51, "value": "E" },
-    { "start": 0.51, "end": 0.72, "value": "F" },
-    { "start": 0.72, "end": 0.79, "value": "B" },
-    { "start": 0.79, "end": 0.93, "value": "H" },
-    { "start": 0.93, "end": 1.00, "value": "C" },
-    { "start": 1.00, "end": 1.21, "value": "B" },
-    { "start": 1.21, "end": 1.52, "value": "X" },
-    { "start": 1.52, "end": 1.57, "value": "B" },
-    { "start": 1.57, "end": 1.61, "value": "C" },
-    { "start": 1.61, "end": 1.96, "value": "B" },
-    { "start": 1.96, "end": 2.03, "value": "C" },
-    { "start": 2.03, "end": 2.17, "value": "A" },
-    { "start": 2.17, "end": 2.39, "value": "E" },
-    { "start": 2.39, "end": 2.46, "value": "F" },
-    { "start": 2.46, "end": 2.61, "value": "A" },
-    { "start": 2.61, "end": 3.02, "value": "X" }
+    { "start": 0.00, "end": 0.03, "value": "X" },
+    { "start": 0.03, "end": 0.16, "value": "E" },
+    { "start": 0.16, "end": 0.23, "value": "B" },
+    { "start": 0.23, "end": 0.37, "value": "C" },
+    { "start": 0.37, "end": 0.51, "value": "B" },
+    { "start": 0.51, "end": 0.59, "value": "A" },
+    { "start": 0.59, "end": 0.80, "value": "C" },
+    { "start": 0.80, "end": 1.01, "value": "B" },
+    { "start": 1.01, "end": 1.15, "value": "H" },
+    { "start": 1.15, "end": 1.22, "value": "C" },
+    { "start": 1.22, "end": 1.31, "value": "A" },
+    { "start": 1.31, "end": 1.48, "value": "B" },
+    { "start": 1.48, "end": 1.55, "value": "C" },
+    { "start": 1.55, "end": 1.63, "value": "A" },
+    { "start": 1.63, "end": 1.94, "value": "C" },
+    { "start": 1.94, "end": 2.08, "value": "E" },
+    { "start": 2.08, "end": 2.16, "value": "A" },
+    { "start": 2.16, "end": 2.81, "value": "B" },
+    { "start": 2.81, "end": 2.89, "value": "A" },
+    { "start": 2.89, "end": 3.10, "value": "C" },
+    { "start": 3.10, "end": 3.17, "value": "B" },
+    { "start": 3.17, "end": 3.28, "value": "X" }
   ]
 }

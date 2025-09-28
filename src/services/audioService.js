@@ -64,10 +64,13 @@ export class AudioService {
       const fileName = `${config.audio.outputDir}/${fileBaseName}.${config.audio.formats.input}`;
       const textInput = message.text;
       
-      console.log(`🎵 Generating audio for ${fileBaseName}: "${textInput.substring(0, 50)}..."`);
+      // Ensure textInput is a string
+      const textString = typeof textInput === 'string' ? textInput : String(textInput || '');
+      
+      console.log(`🎵 Generating audio for ${fileBaseName}: "${textString.substring(0, 50)}..."`);
       
       // Generate voice with OpenAI TTS
-      await this.generateSpeech(textInput, fileName);
+      await this.generateSpeech(textString, fileName);
       
       // Generate lipsync
       await generateLipSync(fileBaseName);

@@ -13,7 +13,8 @@ export const createResponse = (messages, options = {}) => {
     classification = null,
     routing = null,
     processing = null,
-    error = null
+    error = null,
+    taskData = null
   } = options;
 
   const response = { messages };
@@ -47,6 +48,11 @@ export const createResponse = (messages, options = {}) => {
   if (error) {
     response.error = error.message || "Internal server error";
     response.details = error.details || error.message;
+  }
+  
+  // Add taskData to top level of response for FE
+  if (taskData) {
+    response.taskData = taskData;
   }
   
   return response;

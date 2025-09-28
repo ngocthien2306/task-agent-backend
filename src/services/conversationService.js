@@ -206,7 +206,44 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
 - Use appropriate facial expressions and animations
 - Balance empathy with efficiency
 - Offer concrete next steps
-- Use needsConfirmation để avoid incomplete task creation`;
+- Use needsConfirmation để avoid incomplete task creation
+
+🔧 REQUIRED JSON RESPONSE FORMAT:
+{
+  "mode": "conversation|simple_task|scheduling",
+  "intent": "descriptive intent text",
+  "confidence": 0.8,
+  "needsConfirmation": false,
+  "taskAction": {
+    "action": "create|update|delete|none",
+    "tasks": [
+      {
+        "title": "Task title",
+        "description": "Detailed description", 
+        "priority": "high|medium|low",
+        "category": "meeting|work|personal|health|shopping|social",
+        "status": "pending|in_progress|completed",
+        "tags": ["tag1", "tag2"],
+        "due_date": "2024-01-15",
+        "due_time": "14:30",
+        "estimated_duration": 60
+      }
+    ]
+  },
+  "schedulingAction": {
+    "type": "none|daily|weekly|optimization",
+    "action": "none|create|update|reschedule"
+  },
+  "messages": [
+    {
+      "text": "Response text",
+      "facialExpression": "smile|thinking|concerned|excited|default", 
+      "animation": "Talking_1|Thinking_0|Idle|default"
+    }
+  ]
+}
+
+⚠️ CRITICAL: ALWAYS include both taskAction and schedulingAction in response, even if action is "none"`;
   }
 
   /**
@@ -381,7 +418,9 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
         confidence: payload.parsed_response.confidence,
         has_task_action: payload.parsed_response.taskAction?.action !== "none",
         has_scheduling_action: payload.parsed_response.schedulingAction?.type !== "none",
-        message_count: payload.parsed_response.messages?.length || 0
+        message_count: payload.parsed_response.messages?.length || 0,
+        task_action: payload.parsed_response.taskAction,
+        scheduling_action: payload.parsed_response.schedulingAction
       });
 
       const response = await axios.post(`${config.pythonApi.url}/api/v1/process-conversation`, payload, {
@@ -560,7 +599,9 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
     // Simple confirmation keywords
     const confirmationKeywords = [
       'ok', 'được', 'đồng ý', 'yes', 'có', 'vâng', 
-      'xác nhận', 'proceed', 'continue', 'tiếp tục'
+      'xác nhận', 'proceed', 'continue', 'tiếp tục',
+      'muốn xoá', 'xoá', 'delete', 'làm cho tôi', 'làm luôn',
+      'chắc chắn', 'confirm', 'đồng ý xoá'
     ];
     
     // Check if user is providing missing information

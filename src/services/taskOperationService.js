@@ -33,8 +33,8 @@ export class TaskOperationService {
   "messages": [
     {
       "text": "response_message",
-      "facialExpression": "smile|concerned|thinking|surprised|default",
-      "animation": "Talking_0|Talking_1|Thinking_0|Celebrating|default"
+      "facialExpression": "smile|concerned|thinking|surprised",
+      "animation": "Talking_0|Talking_1|Thinking_0|Celebrating"
     }
   ],
   "taskOperation": {
@@ -116,8 +116,13 @@ export class TaskOperationService {
 
 🚨 CONFIRMATION REQUIREMENTS:
 
+**SKIP CONFIRMATION khi user nói rõ ràng:**
+- "không cần hỏi lại", "đừng hỏi nữa", "làm luôn", "xác nhận rồi"
+- "chắc chắn", "confirm", "yes", "đồng ý"
+- Set needsConfirmation: false và execute ngay
+
 **LUÔN cần confirmation cho:**
-- DELETE operations (rủi ro cao)
+- DELETE operations (trừ khi user đã nói skip)
 - PRIORITY changes affecting multiple tasks
 - UPDATE của sensitive fields (due_date, status)
 
@@ -125,6 +130,24 @@ export class TaskOperationService {
 - QUERY operations (read-only)
 - STATS requests (read-only)
 - Simple mark complete (obvious intent)
+
+⏰ TIME UPDATE PHRASES TO RECOGNIZE:
+
+**Cập nhật giờ (due_time):**
+- "cập nhật task ABC về khung giờ 15:30"
+- "đổi giờ task XYZ thành 9h sáng" → "09:00"
+- "reschedule meeting lúc 2h chiều" → "14:00" 
+- "chuyển task về 8:30 tối" → "20:30"
+
+**Cập nhật ngày (due_date):**
+- "đổi ngày task ABC sang hôm nay" → current date
+- "reschedule meeting sang ngày mai" → tomorrow date
+- "chuyển deadline về tuần sau" → +7 days
+- "task này để 25/12" → "2024-12-25"
+
+**Combined time and date:**
+- "task meeting chuyển sang 2h chiều ngày mai" → both due_date and due_time
+- "reschedule báo cáo về 9h sáng thứ 2" → calculate Monday date + 09:00
 
 📊 EXAMPLES:
 
@@ -148,11 +171,56 @@ Input: "Đổi task meeting thành urgent"
   "needsConfirmation": true,
   "confirmationType": "task_selection",
   "taskOperation": {
-    "operation": "priority_change",
+    "operation": "update",
     "targetTasks": [/* matching tasks */],
     "updateData": {
       "field": "priority",
       "newValue": "urgent"
+    }
+  }
+}
+
+**Time Update Examples:**
+Input: "Cập nhật task báo cáo về khung giờ 15:30"
+{
+  "operation": "update",
+  "needsConfirmation": false,
+  "taskOperation": {
+    "operation": "update",
+    "targetTasks": [/* matching task báo cáo */],
+    "updateData": {
+      "field": "due_time",
+      "newValue": "15:30"
+    }
+  }
+}
+
+Input: "Đổi ngày task meeting sang ngày mai"
+{
+  "operation": "update", 
+  "needsConfirmation": false,
+  "taskOperation": {
+    "operation": "update",
+    "targetTasks": [/* matching task meeting */],
+    "updateData": {
+      "field": "due_date",
+      "newValue": "2024-01-16"  // Calculate tomorrow's date
+    }
+  }
+}
+
+Input: "Cập nhật task báo cáo sang 2h chiều ngày mai"
+{
+  "operation": "update",
+  "needsConfirmation": false,
+  "taskOperation": {
+    "operation": "update",
+    "targetTasks": [/* matching task báo cáo */],
+    "updateData": {
+      "fields": [
+        {"field": "due_time", "newValue": "14:00"},
+        {"field": "due_date", "newValue": "2024-01-16"}
+      ]
     }
   }
 }
@@ -263,7 +331,7 @@ Input: "Xóa task báo cáo"
           return await this.executeQuery(taskOperation.queryFilters, userId);
           
         case 'update':
-        case 'priority_change':
+          // Handles all update types: priority_change, time_update, date_update, time_date_update
           return await this.executeUpdate(taskOperation, userId);
           
         case 'mark_complete':
@@ -360,11 +428,16 @@ Input: "Xóa task báo cáo"
    */
   async executeUpdate(taskOperation, userId) {
     try {
-      const targetTask = taskOperation.targetTasks[0];
+      const targetTasks = taskOperation.targetTasks;
       const updateData = taskOperation.updateData;
+      const results = [];
       
-      // Build TaskUpdateRequest payload with proper camelCase fields
-      const updatePayload = {};
+      if (!targetTasks || targetTasks.length === 0) {
+        throw new Error("No target tasks provided for update");
+      }
+      
+      console.log(`🔄 Starting update operation for ${targetTasks.length} tasks`);
+      console.log(`📝 Update data:`, updateData);
       
       // Map fields to camelCase format expected by API
       const fieldMapping = {
@@ -379,35 +452,115 @@ Input: "Xóa task báo cáo"
         'actual_duration': 'actualDuration'
       };
       
-      const apiField = fieldMapping[updateData.field] || updateData.field;
-      updatePayload[apiField] = updateData.newValue;
-      
-      // Special handling for completed status
-      if (updateData.field === 'status' && updateData.newValue === 'completed') {
-        updatePayload.completedAt = new Date().toISOString();
-      }
-      
-      // Special handling for date fields
-      if (updateData.field === 'due_date') {
-        // Ensure proper date format
-        updatePayload.dueDate = new Date(updateData.newValue).toISOString();
-      }
-      
-      console.log(`🔄 Update payload for task ${targetTask.id}:`, updatePayload);
-
-      const response = await axios.put(
-        `${config.pythonApi.url}/api/v1/tasks/${targetTask.id}`,
-        updatePayload,
-        {
-          timeout: config.pythonApi.timeout,
-          headers: { 'Content-Type': 'application/json' }
+      for (const task of targetTasks) {
+        console.log(`\n🎯 Updating task: ${task.id} (${task.title})`);
+        
+        // Build TaskUpdateRequest payload with proper camelCase fields
+        const updatePayload = {};
+        
+        // Handle multiple fields if updateData has multiple updates
+        if (updateData.fields && Array.isArray(updateData.fields)) {
+          // Multiple field update
+          for (const fieldUpdate of updateData.fields) {
+            const apiField = fieldMapping[fieldUpdate.field] || fieldUpdate.field;
+            updatePayload[apiField] = fieldUpdate.newValue;
+            
+            // Special handling for date fields
+            if (fieldUpdate.field === 'due_date') {
+              updatePayload.dueDate = new Date(fieldUpdate.newValue).toISOString();
+            }
+            
+            // Special handling for completed status
+            if (fieldUpdate.field === 'status' && fieldUpdate.newValue === 'completed') {
+              updatePayload.completedAt = new Date().toISOString();
+            }
+          }
+        } else {
+          // Single field update (backward compatibility)
+          const apiField = fieldMapping[updateData.field] || updateData.field;
+          updatePayload[apiField] = updateData.newValue;
+          
+          // Special handling for completed status
+          if (updateData.field === 'status' && updateData.newValue === 'completed') {
+            updatePayload.completedAt = new Date().toISOString();
+          }
+          
+          // Special handling for date fields
+          if (updateData.field === 'due_date') {
+            updatePayload.dueDate = new Date(updateData.newValue).toISOString();
+          }
         }
-      );
+        
+        console.log(`📝 Update payload for task ${task.id}:`, updatePayload);
+
+        // Retry logic similar to executeMarkComplete
+        let retryCount = 0;
+        const maxRetries = 2;
+        let response = null;
+        
+        while (retryCount <= maxRetries) {
+          try {
+            console.log(`🏃 Attempting update API call (attempt ${retryCount + 1}/${maxRetries + 1})...`);
+            
+            response = await axios.put(
+              `${config.pythonApi.url}/api/v1/tasks/${task.id}`,
+              updatePayload,
+              {
+                timeout: 15000, // Increase timeout
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'Connection': 'close' // Force close connection
+                },
+                maxRedirects: 0,
+                validateStatus: function (status) {
+                  return status >= 200 && status < 300;
+                }
+              }
+            );
+            
+            // If we reach here, the request was successful
+            console.log(`✅ Update API response for task ${task.id}:`, {
+              status: response.status,
+              data: response.data
+            });
+            break;
+            
+          } catch (axiosError) {
+            retryCount++;
+            console.error(`❌ Update attempt ${retryCount} failed for task ${task.id}:`, {
+              message: axiosError.message,
+              code: axiosError.code,
+              status: axiosError.response?.status
+            });
+            
+            // If this is the last retry or not a connection error, throw
+            if (retryCount > maxRetries || (axiosError.code !== 'ECONNRESET' && axiosError.code !== 'ECONNREFUSED')) {
+              throw axiosError;
+            }
+            
+            // Wait before retry
+            console.log(`⏳ Waiting 1s before retry...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+        
+        console.log(`✅ Task ${task.id} updated successfully`);
+        
+        results.push({
+          task_id: task.id,
+          title: task.title,
+          updated_field: updateData.field,
+          old_value: task[updateData.field] || 'unknown',
+          new_value: updateData.newValue,
+          updated_task: response.data
+        });
+      }
 
       return {
         success: true,
         operation: 'update',
-        updated_task: response.data,
+        updated_tasks: results,
+        count: results.length,
         update_details: updateData
       };
       
@@ -449,54 +602,78 @@ Input: "Xóa task báo cáo"
           console.log(`⚠️ Task ID format warning: ${task.id} may not be a valid ObjectId`);
         }
         
-        const apiUrl = `${config.pythonApi.url}/api/v1/tasks/${task.id}/complete`;
-        console.log(`🔗 Making request to: ${apiUrl}`);
+        const apiUrl = `${config.pythonApi.url}/api/v1/tasks/${task.id}`;
+        console.log(`🔗 Making request to update endpoint: ${apiUrl}`);
         console.log(`⏱️ Timeout configured: ${config.pythonApi.timeout || 10000}ms`);
         
-        // Test if the URL is reachable first
-        try {
-          console.log(`🏃 Attempting mark complete API call...`);
-          
-          const response = await axios.put(
-            apiUrl,
-            {}, // Empty payload - endpoint handles completion logic
-            {
-              timeout: config.pythonApi.timeout || 10000,
-              headers: { 
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
+        // Retry logic for connection issues
+        let retryCount = 0;
+        const maxRetries = 2;
+        let response = null;
+        
+        while (retryCount <= maxRetries) {
+          try {
+            console.log(`🏃 Attempting mark complete API call (attempt ${retryCount + 1}/${maxRetries + 1})...`);
+            
+            // Use the same update endpoint as executeUpdate (which works)
+            const updatePayload = {
+              status: "completed",
+              completedAt: new Date().toISOString()
+            };
+            
+            console.log(`📝 Using update endpoint with payload:`, updatePayload);
+            
+            response = await axios.put(
+              `${config.pythonApi.url}/api/v1/tasks/${task.id}`, // Same endpoint as executeUpdate
+              updatePayload,
+              {
+                timeout: 15000, // Increase timeout to 15s since API is slow
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'Connection': 'close' // Force close connection to avoid pool issues
+                },
+                maxRedirects: 0, // Disable redirects
+                validateStatus: function (status) {
+                  return status >= 200 && status < 300; // Accept only 2xx status codes
+                }
               }
+            );
+            
+            // If we reach here, the request was successful
+            break;
+            
+          } catch (axiosError) {
+            retryCount++;
+            console.error(`❌ Attempt ${retryCount} failed for task ${task.id}:`, {
+              message: axiosError.message,
+              code: axiosError.code,
+              status: axiosError.response?.status
+            });
+            
+            // If this is the last retry or not a connection error, throw
+            if (retryCount > maxRetries || (axiosError.code !== 'ECONNRESET' && axiosError.code !== 'ECONNREFUSED')) {
+              throw axiosError;
             }
-          );
-          
-          console.log(`✅ Mark complete API response:`, {
-            status: response.status,
-            data: response.data
-          });
-          
-          results.push({
-            task_id: task.id,
-            title: task.title,
-            status: "completed",
-            completed_at: response.data.completed_at,
-            updated_task: response.data
-          });
-          
-        } catch (axiosError) {
-          console.error(`❌ Axios error for task ${task.id}:`, {
-            message: axiosError.message,
-            code: axiosError.code,
-            status: axiosError.response?.status,
-            statusText: axiosError.response?.statusText,
-            data: axiosError.response?.data,
-            config: {
-              url: axiosError.config?.url,
-              method: axiosError.config?.method,
-              timeout: axiosError.config?.timeout
-            }
-          });
-          throw axiosError;
+            
+            // Wait before retry
+            console.log(`⏳ Waiting 1s before retry...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
         }
+        
+        console.log(`✅ Mark complete API response:`, {
+          status: response.status,
+          data: response.data
+        });
+        
+        results.push({
+          task_id: task.id,
+          title: task.title,
+          status: "completed",
+          completed_at: response.data.completed_at,
+          updated_task: response.data
+        });
       }
 
       const result = {

@@ -21,7 +21,7 @@ export class ChatController {
   async handleChat(req, res) {
     const userMessage = req.body.message;
     const sessionId = req.body.sessionId || 'default';
-    const userId = req.body.user_id || 'anonymous';
+    const userId = req.body.userId || req.body.user_id || 'anonymous';
     
     console.log(`💬 New chat request from user: ${userId}, session: ${sessionId}`);
     console.log(`📝 User message: ${userMessage}`);
@@ -353,7 +353,7 @@ export class ChatController {
       console.log(`✅ Operation executed:`, executionResult.success ? 'Success' : 'Failed');
       
       // Generate response messages based on operation result
-      let resultMessages = operationResponse.messages;
+      let resultMessages = Array.isArray(operationResponse.messages) ? operationResponse.messages : [];
       
       if (executionResult.success) {
         // Add success message based on operation type
@@ -367,14 +367,15 @@ export class ChatController {
         resultMessages = [...resultMessages, {
           text: `❌ Có lỗi xảy ra: ${executionResult.error}`,
           facialExpression: "concerned",
-          animation: "default"
+          animation: "Talking_0"
         }];
       }
       
       // Generate audio for all messages
       await this.audioService.generateMessagesAudio(resultMessages, "task_operation");
       
-      const response = createResponse(resultMessages, {
+      // Prepare response with task data for FE
+      const responseData = {
         mode: "task_operation",
         intent: operationResponse.intent,
         confidence: operationResponse.confidence,
@@ -382,13 +383,55 @@ export class ChatController {
         operationResult: executionResult,
         classification: classification,
         routing: routing
-      });
+      };
+
+      // Include task data for query operations to show in FE toast
+      if (operationResponse.operation === 'query' && executionResult.success && executionResult.results) {
+        responseData.taskData = {
+          operation: 'query',
+          tasks: executionResult.results,
+          count: executionResult.count,
+          filters: executionResult.filters,
+          displayType: 'toast' // Hint for FE to show as toast
+        };
+      }
+
+      // Include updated task data for update operations
+      if (operationResponse.operation === 'update' && executionResult.success && executionResult.updated_tasks) {
+        responseData.taskData = {
+          operation: 'update',
+          tasks: executionResult.updated_tasks,
+          count: executionResult.count,
+          displayType: 'toast'
+        };
+      }
+
+      // Include completed task data for mark_complete operations
+      if (operationResponse.operation === 'mark_complete' && executionResult.success && executionResult.completed_tasks) {
+        responseData.taskData = {
+          operation: 'mark_complete',
+          tasks: executionResult.completed_tasks,
+          count: executionResult.count,
+          displayType: 'toast'
+        };
+      }
+
+      const response = createResponse(resultMessages, responseData);
+      
+      // Debug logging for task data
+      if (responseData.taskData) {
+        console.log(`📋 Sending taskData to FE:`, {
+          operation: responseData.taskData.operation,
+          taskCount: responseData.taskData.count,
+          displayType: responseData.taskData.displayType
+        });
+      }
       
       res.send(response);
       
     } catch (error) {
       console.error("❌ Error in task operations:", error);
-      await this.sendErrorResponse(res, error, "task operations", sessionId);
+      await this.sendErrorResponse(res, "Sorry, có lỗi xảy ra khi xử lý thao tác với task.", 500, error.message);
     }
   }
 
@@ -410,8 +453,9 @@ export class ChatController {
       case 'update':
       case 'priority_change':
       case 'mark_complete':
+        const taskName = result.updated_tasks?.[0]?.title || result.updated_tasks?.[0]?.updated_task?.title || 'task';
         return {
-          text: `✅ Đã cập nhật task "${result.updated_task?.title}" thành công!`,
+          text: `✅ Đã cập nhật ${taskName} thành công!`,
           facialExpression: "smile", 
           animation: "Celebrating"
         };
@@ -434,7 +478,7 @@ export class ChatController {
         return {
           text: "✅ Thao tác hoàn thành thành công!",
           facialExpression: "smile",
-          animation: "default"
+          animation: "Talking_1"
         };
     }
   }
@@ -487,7 +531,7 @@ export class ChatController {
           {
             text: `❌ Có lỗi khi thực hiện: ${executionResult.error}`,
             facialExpression: "concerned",
-            animation: "default"
+            animation: "Talking_0"
           }
         ];
       }
@@ -495,14 +539,52 @@ export class ChatController {
       // Generate audio for messages
       await this.audioService.generateMessagesAudio(responseMessages, "task_operation_confirmed");
       
-      const response = createResponse(responseMessages, {
+      // Prepare response data
+      const responseData = {
         mode: "task_operation",
         intent: operationData.intent,
         confidence: operationData.confidence,
         sessionId: sessionId,
         operationResult: executionResult,
         confirmed: true
-      });
+      };
+
+      // Include task data for confirmed operations
+      if (executionResult.success) {
+        if (operationData.operation === 'delete' && executionResult.deleted_tasks) {
+          responseData.taskData = {
+            operation: 'delete',
+            tasks: executionResult.deleted_tasks,
+            count: executionResult.count,
+            displayType: 'toast'
+          };
+        } else if (operationData.operation === 'update' && executionResult.updated_tasks) {
+          responseData.taskData = {
+            operation: 'update',
+            tasks: executionResult.updated_tasks,
+            count: executionResult.count,
+            displayType: 'toast'
+          };
+        } else if (operationData.operation === 'mark_complete' && executionResult.completed_tasks) {
+          responseData.taskData = {
+            operation: 'mark_complete',
+            tasks: executionResult.completed_tasks,
+            count: executionResult.count,
+            displayType: 'toast'
+          };
+        }
+      }
+
+      const response = createResponse(responseMessages, responseData);
+      
+      // Debug logging for confirmed task data
+      if (responseData.taskData) {
+        console.log(`📋 Sending confirmed taskData to FE:`, {
+          operation: responseData.taskData.operation,
+          taskCount: responseData.taskData.count,
+          displayType: responseData.taskData.displayType
+        });
+      }
       
       res.send(response);
       
