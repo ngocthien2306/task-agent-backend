@@ -9,21 +9,30 @@ export class IntentClassifier {
   }
 
   /**
-   * Classify user intent
+   * Classify user intent with conversation context
    * @param {string} userInput - User input text
    * @param {string} userId - User ID for context
+   * @param {Array} conversationHistory - Previous conversation messages
    * @returns {Object} - Classification result
    */
-  async classifyIntent(userInput, userId) {
+  async classifyIntent(userInput, userId, conversationHistory = []) {
+    // Extract recent context for confirmation detection
+    const recentMessages = conversationHistory.slice(-5); // Last 3 messages
+    const contextString = recentMessages.length > 0 
+      ? `\n\nCONVERSATION CONTEXT (recent messages):\n${recentMessages.map(msg => `${msg.role}: ${msg.content}`).join('\n')}`
+      : '';
+
     const prompt = `
 Bạn là một AI classifier chuyên phân tích intent của user trong hệ thống quản lý task.
 
-INPUT: "${userInput}"
+🔍 QUAN TRỌNG: Kiểm tra CONVERSATION CONTEXT để detect confirmation responses!
+
+INPUT: "${userInput}"${contextString}
 
 Hãy phân tích và trả về JSON với format sau:
 
 {
-  "intentType": "conversation|simple_task|scheduling|task_query|task_update|task_delete|task_stats|task_priority|task_reminder",
+  "intentType": "conversation|simple_task|scheduling|task_query|task_update|task_delete|task_stats|task_priority",
   "confidence": 0.0-1.0,
   "action": "create|update|delete|query|stats|chat|prioritize|remind",
   "taskIdentifier": "task_title_or_keyword_or_null",
@@ -67,16 +76,25 @@ CLASSIFICATION RULES:
    - VD: "Task gọi khách hàng ưu tiên cao", "Đặt task X làm urgent", "Priority thấp cho task Y"
    - taskIdentifier: tên task cần thay đổi priority
 
-9. **task_reminder**: 
-   - Thiết lập reminder cho task
-   - VD: "Nhắc tôi 30 phút trước meeting", "Set reminder cho task X", "Báo thức trước 1 giờ"
-   - taskIdentifier: tên task cần set reminder
 
-Chú ý:
-- Nếu có nhắc đến tên task cụ thể -> taskIdentifier
+🔍 CONTEXT-AWARE CLASSIFICATION RULES:
+
+**CONFIRMATION DETECTION:**
+- Nếu context cho thấy hệ thống vừa hỏi confirmation (needsConfirmation: true), và user trả lời "có", "được", "ok", "yes" → PRESERVE original intent type từ context
+- VD: Context: "Bạn chắc muốn xóa task X?", User: "Có" → intentType: "task_delete" (NOT conversation)
+- Confirmation keywords: "có", "được", "ok", "yes", "đồng ý", "xác nhận", "chắc chắn"
+
+**REGULAR CLASSIFICATION:**
+- Nếu có nhắc đến tên task cụ thể → taskIdentifier
 - Confidence cao khi intent rõ ràng
 - Ưu tiên task operations nếu có keyword liên quan task
+- Context giúp phân biệt confirmation vs new request
 - Nếu không chắc chắn, default về conversation với confidence thấp
+
+**IMPORTANT:** 
+- Luôn kiểm tra conversation context TRƯỚC KHI classify
+- Confirmation responses PHẢI preserve original intent từ context
+- Chỉ classify như conversation KHI thực sự là new conversation
 `;
 
     try {
@@ -152,17 +170,16 @@ Chú ý:
       };
     }
 
-    // Task operations - hiện tại để trống, sẽ implement sau
+    // Task operations - route to dedicated task operations handler
     if (['task_query', 'task_update', 'task_delete', 'task_stats', 'task_priority', 'task_reminder'].includes(intentType)) {
-      console.log(`📋 Task operation detected: ${intentType} - Will implement later`);
+      console.log(`📋 Task operation detected: ${intentType} - Routing to task operations handler`);
       
-      // Tạm thời trả về conversation response
       return {
-        route: 'task-operation-placeholder',
+        route: 'task-operations',
         intentType: intentType,
         taskIdentifier: taskIdentifier,
         action: action,
-        message: `Tính năng ${intentType} đang được phát triển. Hiện tại tôi chỉ có thể giúp bạn tạo task mới, lên lịch và trò chuyện.`
+        confidence: confidence
       };
     }
 

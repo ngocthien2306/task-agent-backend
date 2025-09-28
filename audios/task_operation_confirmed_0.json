@@ -1,0 +1,37 @@
+{
+  "metadata": {
+    "soundFile": "/Users/ngocthien.ai/Source/Projects/3d_avartar/task-agent-backend/audios/task_operation_confirmed_0.wav",
+    "duration": 4.99
+  },
+  "mouthCues": [
+    { "start": 0.00, "end": 0.04, "value": "X" },
+    { "start": 0.04, "end": 0.09, "value": "B" },
+    { "start": 0.09, "end": 0.20, "value": "D" },
+    { "start": 0.20, "end": 0.27, "value": "C" },
+    { "start": 0.27, "end": 0.34, "value": "E" },
+    { "start": 0.34, "end": 0.62, "value": "B" },
+    { "start": 0.62, "end": 0.97, "value": "C" },
+    { "start": 0.97, "end": 1.36, "value": "X" },
+    { "start": 1.36, "end": 1.44, "value": "B" },
+    { "start": 1.44, "end": 1.55, "value": "A" },
+    { "start": 1.55, "end": 1.61, "value": "B" },
+    { "start": 1.61, "end": 1.81, "value": "C" },
+    { "start": 1.81, "end": 1.88, "value": "B" },
+    { "start": 1.88, "end": 2.02, "value": "G" },
+    { "start": 2.02, "end": 2.23, "value": "C" },
+    { "start": 2.23, "end": 2.71, "value": "B" },
+    { "start": 2.71, "end": 2.88, "value": "C" },
+    { "start": 2.88, "end": 2.95, "value": "D" },
+    { "start": 2.95, "end": 3.23, "value": "B" },
+    { "start": 3.23, "end": 3.41, "value": "A" },
+    { "start": 3.41, "end": 3.45, "value": "B" },
+    { "start": 3.45, "end": 3.53, "value": "A" },
+    { "start": 3.53, "end": 3.90, "value": "B" },
+    { "start": 3.90, "end": 3.97, "value": "G" },
+    { "start": 3.97, "end": 4.18, "value": "B" },
+    { "start": 4.18, "end": 4.32, "value": "G" },
+    { "start": 4.32, "end": 4.39, "value": "C" },
+    { "start": 4.39, "end": 4.67, "value": "B" },
+    { "start": 4.67, "end": 4.99, "value": "X" }
+  ]
+}

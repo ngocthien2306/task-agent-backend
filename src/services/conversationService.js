@@ -8,6 +8,7 @@ export class ConversationService {
       apiKey: config.openai.apiKey,
     });
     this.sessions = new Map(); // Store conversation history for each user
+    this.pendingConfirmations = new Map(); // Store pending confirmations by sessionId
     this.backgroundJobQueue = [];
     this.isProcessingJobs = false;
   }
@@ -32,6 +33,13 @@ export class ConversationService {
   "mode": "conversation|simple_task|scheduling",
   "intent": "brief_description_of_user_intent",
   "confidence": 0.0-1.0,
+  "needsConfirmation": true|false,
+  "confirmationType": "scheduling_details|task_clarification|time_conflicts|none",
+  "pendingData": {
+    "tasks": [...],
+    "timeSlots": [...],
+    "missingInfo": ["start_time", "duration", "priority"]
+  },
   "messages": [
     {
       "text": "conversational_response",
@@ -63,7 +71,7 @@ export class ConversationService {
   "schedulingAction": {
     "type": "daily_planning|rescheduling|weekly_planning|none",
     "action": "create_schedule|reschedule|weekly_plan|conflict_resolve|none",
-    "timeScope": "today|tomorrow|this_week|next_week",
+    "timeScope": "today|tomorrow|this_week|next_week|null",
     "tasks": [
       {
         "title": "task_title",
@@ -107,12 +115,98 @@ export class ConversationService {
 - Weekly planning: "Plan cho tuần này"
 - Time conflicts and optimization needed
 
+🚨 REQUIRED FIELDS:
+**ALWAYS include these fields in EVERY response:**
+- taskAction: Required (use "action": "none" if no task action)
+- schedulingAction: Required (use "type": "none", "action": "none" if no scheduling)
+
+📝 CONFIRMATION LOGIC:
+
+**🔍 LUÔN KIỂM TRA THÔNG TIN CHƯA RÕ RÀNG:**
+Khi process-conversation, nếu user input có thông tin mơ hồ, PHẢI hỏi lại để làm rõ:
+
+- **Thời gian không cụ thể**: "hôm nay", "mai", "tuần sau" → Hỏi giờ cụ thể
+- **Địa điểm không rõ**: "meeting" → Hỏi địa điểm, online hay offline
+- **Người liên quan không rõ**: "gọi khách hàng" → Hỏi tên khách hàng cụ thể  
+- **Mục đích không rõ**: "làm báo cáo" → Hỏi loại báo cáo, deadline
+- **Độ ưu tiên không rõ**: Task quan trọng hay thường → Hỏi mức độ ưu tiên
+
+**Khi nào cần confirmation (needsConfirmation: true):**
+1. **scheduling_details**: Cần thông tin thời gian cụ thể
+   - VD: "Meeting hôm nay lúc mấy giờ? Ở đâu? Với ai?"
+   - missingInfo: ["start_time", "duration", "meeting_location", "participants"]
+
+2. **task_clarification**: Task thiếu chi tiết quan trọng
+   - VD: "Gọi khách hàng nào? Về vấn đề gì? Deadline khi nào?"
+   - missingInfo: ["contact_person", "call_purpose", "priority", "deadline"]
+
+3. **time_conflicts**: Phát hiện xung đột thời gian với existing tasks
+   - VD: "Meeting 10h trùng với task 'Báo cáo tuần'. Reschedule task nào?"
+   - missingInfo: ["preferred_time", "flexible_tasks"]
+
+**Khi không cần confirmation (needsConfirmation: false):**
+- Thông tin đầy đủ để tạo task/schedule
+- Conversation đơn giản
+- Simple task với thời gian rõ ràng
+
+**📋 VÍ DỤ CẦN HỎI LẠI:**
+
+❌ Input mơ hồ: "Nhắc tôi meeting hôm nay"  
+✅ Cần hỏi: "Meeting hôm nay lúc mấy giờ? Ở đâu? Meeting với ai về chủ đề gì?"
+
+❌ Input mơ hồ: "Tôi cần gọi khách hàng"
+✅ Cần hỏi: "Gọi khách hàng nào? Về vấn đề gì? Cần gọi lúc mấy giờ?"
+
+❌ Input mơ hồ: "Làm báo cáo tuần sau"  
+✅ Cần hỏi: "Báo cáo gì? Deadline cụ thể ngày nào? Báo cáo cho ai?"
+
+❌ Input mơ hồ: "Meeting team và viết document"
+✅ Cần hỏi: "Meeting team lúc mấy giờ? Document gì, deadline khi nào? Thứ tự ưu tiên như thế nào?"
+
+**🔍 PHÂN TÍCH EXISTING TASKS:**
+Khi có existing tasks trong context, PHẢI kiểm tra:
+
+1. **Time conflicts**: Tasks cùng thời gian → Hỏi reschedule
+2. **Duplicate tasks**: Tasks tương tự đã tồn tại → Hỏi có muốn update hay tạo mới
+3. **Priority conflicts**: Nhiều tasks urgent cùng deadline → Hỏi ưu tiên
+4. **Resource conflicts**: Cùng category/người thực hiện → Hỏi phân bổ thời gian
+
+**Ví dụ phân tích conflict:**
+- Existing: "Meeting team - 10:00 AM"  
+- New request: "Gọi khách hàng hôm nay"
+- Response: "Bạn đã có meeting team lúc 10h. Muốn gọi khách hàng lúc mấy giờ để không trùng?"
+
+**pendingData format:**
+- Lưu trữ thông tin đã có
+- Chỉ rõ missingInfo để hỏi user
+- Chuẩn bị sẵn để process khi confirmed
+
+**Example needsConfirmation response:**
+{
+  "needsConfirmation": true,
+  "confirmationType": "scheduling_details",
+  "pendingData": {
+    "tasks": [
+      {"title": "Meeting team", "startTime": "10:00", "confirmed": true},
+      {"title": "Viết báo cáo quarterly", "estimated_duration": 120, "confirmed": false},
+      {"title": "Gọi khách hàng", "quantity": 3, "confirmed": false}
+    ],
+    "missingInfo": ["bao_cao_deadline", "khach_hang_names", "call_priority"]
+  },
+  "messages": [{
+    "text": "Tôi thấy bạn có 3 việc cần làm! Meeting team 10h đã rõ. Còn báo cáo quarterly deadline khi nào? Và 3 khách hàng cần gọi là ai, priority thế nào?",
+    "facialExpression": "thinking",
+    "animation": "Thinking_0"
+  }]
+}
+
 ✨ RESPONSE QUALITY RULES:
 - Always acknowledge emotional state in messages
 - Provide specific, actionable responses
 - Use appropriate facial expressions and animations
 - Balance empathy with efficiency
-- Offer concrete next steps`;
+- Offer concrete next steps
+- Use needsConfirmation để avoid incomplete task creation`;
   }
 
   /**
@@ -153,21 +247,82 @@ export class ConversationService {
   }
 
   /**
+   * Fetch and optimize existing user tasks
+   * @param {string} userId - User ID
+   * @returns {Object} - Optimized tasks data
+   */
+  async fetchUserTasks(userId) {
+    try {
+      console.log(`📋 Fetching existing tasks for user: ${userId}`);
+      
+      const response = await axios.get(`${config.pythonApi.url}/api/v1/tasks-user/${userId}`, {
+        timeout: config.pythonApi.timeout,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Source': 'nodejs-server'
+        }
+      });
+
+      const tasks = response.data || [];
+      console.log(`✅ Fetched ${tasks.length} tasks for user ${userId}`);
+      
+      // Optimize for token efficiency - keep only essential fields
+      const optimizedTasks = tasks.map(task => ({
+        id: task.id, // Needed for update/delete operations
+        title: task.title,
+        status: task.status,
+        priority: task.priority,
+        category: task.category,
+        due_date: task.due_date ? task.due_date.split('T')[0] : null, // YYYY-MM-DD only
+        due_time: task.due_time, // HH:MM
+        duration: task.estimated_duration // minutes
+      }));
+
+      return {
+        tasks: optimizedTasks,
+        count: tasks.length
+      };
+
+    } catch (error) {
+      console.error(`❌ Error fetching tasks for user ${userId}:`, error.message);
+      return {
+        tasks: [],
+        count: 0
+      };
+    }
+  }
+
+  /**
    * Process conversation with OpenAI
    * @param {string} userMessage - User message
    * @param {string} sessionId - Session ID
+   * @param {string} userId - User ID for task fetching
    * @returns {Object} - AI response
    */
-  async processConversation(userMessage, sessionId) {
+  async processConversation(userMessage, sessionId, userId = null) {
     const messageHistory = this.getSession(sessionId);
     
-    // Add user message to history
+    // Fetch existing tasks if userId provided and it's a task/scheduling related intent
+    let existingTasksContext = "";
+    if (userId && (userMessage.includes('task') || userMessage.includes('lịch') || userMessage.includes('meeting') || userMessage.includes('sắp xếp'))) {
+      const taskData = await this.fetchUserTasks(userId);
+      if (taskData.tasks.length > 0) {
+        existingTasksContext = `\n\n📋 EXISTING TASKS (${taskData.count} total):\n${JSON.stringify(taskData.tasks, null, 2)}\n\n⚠️ IMPORTANT: Check for time conflicts and duplicate tasks before creating new ones!`;
+      } else {
+        existingTasksContext = "\n\n📋 EXISTING TASKS: No existing tasks found.";
+      }
+    }
+    
+    // Add user message with existing tasks context to history
     this.addMessageToSession(sessionId, {
-      role: "user",
-      content: userMessage
+      role: "user", 
+      content: userMessage + existingTasksContext
     });
 
     console.log(`🧠 Sending ${messageHistory.length} messages to OpenAI...`);
+    if (existingTasksContext) {
+      console.log(`📋 Including existing tasks context for conflict detection`);
+    }
 
     try {
       const completion = await this.openai.chat.completions.create({
@@ -334,6 +489,153 @@ export class ConversationService {
   }
 
   /**
+   * Store pending confirmation data
+   * @param {string} sessionId - Session ID
+   * @param {Object} confirmationData - Confirmation data
+   */
+  storePendingConfirmation(sessionId, confirmationData) {
+    this.pendingConfirmations.set(sessionId, {
+      ...confirmationData,
+      timestamp: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString() // 30 minutes expiry
+    });
+    
+    console.log(`📋 Stored pending confirmation for session ${sessionId}:`, {
+      confirmationType: confirmationData.confirmationType,
+      missingInfo: confirmationData.pendingData?.missingInfo
+    });
+  }
+
+  /**
+   * Get pending confirmation data
+   * @param {string} sessionId - Session ID
+   * @returns {Object|null} - Pending confirmation data
+   */
+  getPendingConfirmation(sessionId) {
+    const pending = this.pendingConfirmations.get(sessionId);
+    
+    if (!pending) return null;
+    
+    // Check expiry
+    if (new Date() > new Date(pending.expiresAt)) {
+      console.log(`⏰ Pending confirmation expired for session ${sessionId}`);
+      this.pendingConfirmations.delete(sessionId);
+      return null;
+    }
+    
+    return pending;
+  }
+
+  /**
+   * Clear pending confirmation
+   * @param {string} sessionId - Session ID
+   */
+  clearPendingConfirmation(sessionId) {
+    const cleared = this.pendingConfirmations.delete(sessionId);
+    if (cleared) {
+      console.log(`✅ Cleared pending confirmation for session ${sessionId}`);
+    }
+  }
+
+  /**
+   * Check if response needs confirmation and should not be sent to Python API
+   * @param {Object} aiResponse - AI response
+   * @returns {boolean} - True if needs confirmation
+   */
+  needsConfirmation(aiResponse) {
+    return aiResponse.needsConfirmation === true && 
+           aiResponse.confirmationType && 
+           aiResponse.confirmationType !== "none";
+  }
+
+  /**
+   * Detect if user input is a confirmation response
+   * @param {string} userInput - User input
+   * @param {Object} pendingData - Pending confirmation data
+   * @returns {boolean} - True if it's a confirmation
+   */
+  isConfirmationResponse(userInput, pendingData) {
+    if (!pendingData) return false;
+    
+    // Simple confirmation keywords
+    const confirmationKeywords = [
+      'ok', 'được', 'đồng ý', 'yes', 'có', 'vâng', 
+      'xác nhận', 'proceed', 'continue', 'tiếp tục'
+    ];
+    
+    // Check if user is providing missing information
+    const missingInfo = pendingData.pendingData?.missingInfo || [];
+    const hasInfoKeywords = missingInfo.some(info => 
+      userInput.toLowerCase().includes(info.toLowerCase()) ||
+      userInput.includes('giờ') || userInput.includes('ngày') ||
+      userInput.includes('deadline') || userInput.includes('khách hàng')
+    );
+    
+    const hasConfirmationKeyword = confirmationKeywords.some(keyword => 
+      userInput.toLowerCase().includes(keyword)
+    );
+    
+    return hasConfirmationKeyword || hasInfoKeywords;
+  }
+
+  /**
+   * Merge user confirmation with pending data
+   * @param {string} userInput - User confirmation input
+   * @param {Object} pendingData - Pending confirmation data
+   * @returns {Object} - Merged response for Python API
+   */
+  mergeConfirmationData(userInput, pendingData) {
+    // Create a merged response with original pending data plus user confirmation
+    const mergedResponse = {
+      ...pendingData,
+      needsConfirmation: false, // Now confirmed
+      confirmationType: "completed",
+      userConfirmation: userInput,
+      confirmed: true,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Ensure required fields are present for Python API
+    if (!mergedResponse.taskAction) {
+      mergedResponse.taskAction = {
+        action: "create",
+        task: {
+          title: "Confirmed task from scheduling",
+          description: `Task confirmed: ${userInput}`,
+          priority: "medium",
+          category: "work", 
+          dueDate: new Date().toISOString().split('T')[0],
+          dueTime: null,
+          status: "pending",
+          tags: ["confirmed"],
+          subtasks: [],
+          reminders: []
+        }
+      };
+    }
+    
+    if (!mergedResponse.schedulingAction) {
+      mergedResponse.schedulingAction = {
+        type: "daily_planning",
+        action: "create_schedule",
+        timeScope: "today",
+        tasks: [],
+        conflicts: []
+      };
+    }
+    
+    console.log(`🔄 Merged confirmation data:`, {
+      originalType: pendingData.confirmationType,
+      userInput: userInput.substring(0, 50) + "...",
+      confirmed: true,
+      hasTaskAction: !!mergedResponse.taskAction,
+      hasSchedulingAction: !!mergedResponse.schedulingAction
+    });
+    
+    return mergedResponse;
+  }
+
+  /**
    * Get background job status
    * @returns {Object} - Job status
    */
@@ -342,7 +644,8 @@ export class ConversationService {
       queueSize: this.backgroundJobQueue.length,
       isProcessing: this.isProcessingJobs,
       totalProcessed: "N/A",
-      lastProcessed: new Date().toISOString()
+      lastProcessed: new Date().toISOString(),
+      pendingConfirmations: this.pendingConfirmations.size
     };
   }
 }

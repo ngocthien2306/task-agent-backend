@@ -1,6 +1,7 @@
 import { AudioService } from "../services/audioService.js";
 import { IntentClassifier } from "../services/intentClassifier.js";
 import { ConversationService } from "../services/conversationService.js";
+import { TaskOperationService } from "../services/taskOperationService.js";
 import { createResponse, createIntroMessages, createErrorMessage } from "../utils/responseHelper.js";
 import config from "../config/index.js";
 
@@ -9,6 +10,7 @@ export class ChatController {
     this.audioService = new AudioService();
     this.intentClassifier = new IntentClassifier();
     this.conversationService = new ConversationService();
+    this.taskOperationService = new TaskOperationService();
   }
 
   /**
@@ -49,18 +51,30 @@ export class ChatController {
       let routing = null;
       
       try {
-        // Classify user intent
-        classification = await this.intentClassifier.classifyIntent(userMessage, userId);
+        // Get conversation history for context-aware classification
+        const conversationHistory = this.conversationService.getSession(sessionId);
+        
+        // Classify user intent with conversation context
+        classification = await this.intentClassifier.classifyIntent(userMessage, userId, conversationHistory);
         
         // Route request based on classification
         routing = await this.intentClassifier.routeRequest(classification, userMessage, userId, sessionId);
         
         console.log(`📍 Routing decision:`, routing);
         
-        // Handle different routes
-        if (routing.route === 'task-operation-placeholder') {
-          const response = await this.createPlaceholderResponse(routing, classification);
-          res.send(response);
+        // Handle task operations route
+        if (routing.route === 'task-operations') {
+          // Check for pending task operation confirmation first
+          const taskOperationConfirmation = this.conversationService.getPendingConfirmation(sessionId);
+          if (taskOperationConfirmation && taskOperationConfirmation.type === 'task_operation' && 
+              this.conversationService.isConfirmationResponse(userMessage, taskOperationConfirmation)) {
+            console.log(`✅ Detected task operation confirmation for session ${sessionId}`);
+            this.conversationService.clearPendingConfirmation(sessionId);
+            await this.handleTaskOperationConfirmation(userMessage, taskOperationConfirmation, sessionId, userId, res);
+            return;
+          }
+          
+          await this.handleTaskOperations(userMessage, sessionId, userId, classification, routing, res);
           return;
         }
         
@@ -69,18 +83,102 @@ export class ChatController {
           console.log(`💬 Processing as conversation/task creation with mode: ${routing.intentType}`);
           
           try {
-            // Process conversation with OpenAI
-            const parsedResponse = await this.conversationService.processConversation(userMessage, sessionId);
+            // ===== CHECK FOR PENDING CONFIRMATIONS =====
+            const pendingConfirmation = this.conversationService.getPendingConfirmation(sessionId);
+            
+            if (pendingConfirmation && this.conversationService.isConfirmationResponse(userMessage, pendingConfirmation)) {
+              console.log(`✅ Detected confirmation response for session ${sessionId}`);
+              
+              // Clear pending confirmation first
+              this.conversationService.clearPendingConfirmation(sessionId);
+              
+              // Handle regular conversation confirmation (existing logic)
+              const combinedInput = `${pendingConfirmation.originalUserInput}\n\nThông tin bổ sung từ user: ${userMessage}`;
+              console.log(`🔄 Processing combined input with OpenAI:`, combinedInput.substring(0, 100) + "...");
+              
+              let finalResponse;
+              try {
+                finalResponse = await this.conversationService.processConversation(combinedInput, sessionId, userId);
+              } catch (error) {
+                console.log(`⚠️ OpenAI failed for confirmation, using merged pending data`);
+                finalResponse = this.conversationService.mergeConfirmationData(userMessage, pendingConfirmation);
+              }
+              
+              // Extract messages
+              let messages = finalResponse.messages || [finalResponse];
+              
+              // Generate audio for all messages
+              await this.audioService.generateMessagesAudio(messages, "confirmation");
+              
+              // Send to Python API immediately (no more confirmation needed)
+              this.conversationService.addToBackgroundQueue({
+                type: 'confirmation_completion',
+                userInput: combinedInput,
+                aiResponse: finalResponse,
+                sessionId: sessionId,
+                userId: userId,
+                isConfirmed: true
+              });
+              
+              console.log(`🚀 Sending confirmed response with ${messages.length} messages`);
+              const response = createResponse(messages, {
+                mode: finalResponse.mode,
+                intent: finalResponse.intent,
+                confidence: finalResponse.confidence,
+                sessionId: sessionId,
+                processing: "confirmed_and_queued",
+                classification: classification,
+                routing: routing
+              });
+              
+              res.send(response);
+              return;
+            }
+            
+            // ===== NORMAL CONVERSATION PROCESSING =====
+            // Process conversation with OpenAI, including userId for task fetching
+            const parsedResponse = await this.conversationService.processConversation(userMessage, sessionId, userId);
             
             // Extract messages
             let messages = parsedResponse.messages || [parsedResponse];
             
             console.log(`🎭 Processing ${messages.length} messages for audio generation...`);
             console.log(`📊 Mode: ${parsedResponse.mode}, Intent: ${parsedResponse.intent}`);
+            console.log(`🔍 Needs confirmation: ${parsedResponse.needsConfirmation || false}`);
 
             // Generate audio and lipsync for all messages
             await this.audioService.generateMessagesAudio(messages, "message");
 
+            // ===== CHECK IF RESPONSE NEEDS CONFIRMATION =====
+            if (this.conversationService.needsConfirmation(parsedResponse)) {
+              console.log(`⏳ Response needs confirmation, storing pending data...`);
+              
+              // Store pending confirmation data instead of sending to Python API
+              this.conversationService.storePendingConfirmation(sessionId, {
+                ...parsedResponse,
+                originalUserInput: userMessage,
+                originalClassification: classification,
+                originalRouting: routing
+              });
+              
+              console.log(`🚀 Sending confirmation request with ${messages.length} messages`);
+              const response = createResponse(messages, {
+                mode: parsedResponse.mode,
+                intent: parsedResponse.intent,
+                confidence: parsedResponse.confidence,
+                sessionId: sessionId,
+                processing: "awaiting_confirmation",
+                needsConfirmation: true,
+                confirmationType: parsedResponse.confirmationType,
+                classification: classification,
+                routing: routing
+              });
+              
+              res.send(response);
+              return;
+            }
+
+            // ===== NO CONFIRMATION NEEDED - PROCESS NORMALLY =====
             // Add to background queue for database processing
             this.conversationService.addToBackgroundQueue({
               type: 'conversation_processing',
@@ -189,5 +287,228 @@ export class ChatController {
       message: "Background job processing triggered",
       queueSize: status.queueSize
     });
+  }
+
+  /**
+   * Handle task operations (query, update, delete, stats)
+   * @param {string} userMessage - User message
+   * @param {string} sessionId - Session ID
+   * @param {string} userId - User ID
+   * @param {Object} classification - Intent classification
+   * @param {Object} routing - Routing decision
+   * @param {Object} res - Express response object
+   */
+  async handleTaskOperations(userMessage, sessionId, userId, classification, routing, res) {
+    try {
+      console.log(`🔧 Handling task operations for user: ${userId}`);
+      
+      // Fetch current user tasks
+      const taskData = await this.conversationService.fetchUserTasks(userId);
+      console.log(`📋 Found ${taskData.count} existing tasks for operations`);
+      
+      // Process with task operation service
+      const operationResponse = await this.taskOperationService.processTaskOperation(
+        userMessage, 
+        taskData.tasks, 
+        sessionId
+      );
+      
+      console.log(`🎯 Operation: ${operationResponse.operation}, Needs confirmation: ${operationResponse.needsConfirmation}`);
+      
+      // Handle confirmation flow
+      if (operationResponse.needsConfirmation) {
+        // Store pending operation for confirmation
+        this.conversationService.storePendingConfirmation(sessionId, {
+          type: 'task_operation',
+          confirmationType: operationResponse.confirmationType,
+          pendingData: operationResponse,
+          originalUserInput: userMessage,
+          operation: operationResponse.operation
+        });
+        
+        // Generate audio for confirmation message
+        await this.audioService.generateMessagesAudio(operationResponse.messages, "task_operation");
+        
+        const response = createResponse(operationResponse.messages, {
+          mode: "task_operation",
+          intent: operationResponse.intent,
+          confidence: operationResponse.confidence,
+          sessionId: sessionId,
+          needsConfirmation: true,
+          confirmationType: operationResponse.confirmationType,
+          classification: classification,
+          routing: routing
+        });
+        
+        res.send(response);
+        return;
+      }
+      
+      // Execute operation immediately if no confirmation needed
+      const executionResult = await this.taskOperationService.executeTaskOperation(
+        operationResponse.taskOperation, 
+        userId
+      );
+      
+      console.log(`✅ Operation executed:`, executionResult.success ? 'Success' : 'Failed');
+      
+      // Generate response messages based on operation result
+      let resultMessages = operationResponse.messages;
+      
+      if (executionResult.success) {
+        // Add success message based on operation type
+        const successMessage = this.createOperationSuccessMessage(
+          operationResponse.operation, 
+          executionResult
+        );
+        resultMessages = [...resultMessages, successMessage];
+      } else {
+        // Add error message
+        resultMessages = [...resultMessages, {
+          text: `❌ Có lỗi xảy ra: ${executionResult.error}`,
+          facialExpression: "concerned",
+          animation: "default"
+        }];
+      }
+      
+      // Generate audio for all messages
+      await this.audioService.generateMessagesAudio(resultMessages, "task_operation");
+      
+      const response = createResponse(resultMessages, {
+        mode: "task_operation",
+        intent: operationResponse.intent,
+        confidence: operationResponse.confidence,
+        sessionId: sessionId,
+        operationResult: executionResult,
+        classification: classification,
+        routing: routing
+      });
+      
+      res.send(response);
+      
+    } catch (error) {
+      console.error("❌ Error in task operations:", error);
+      await this.sendErrorResponse(res, error, "task operations", sessionId);
+    }
+  }
+
+  /**
+   * Create success message based on operation type
+   * @param {string} operation - Operation type
+   * @param {Object} result - Execution result
+   * @returns {Object} - Success message
+   */
+  createOperationSuccessMessage(operation, result) {
+    switch (operation) {
+      case 'query':
+        return {
+          text: `✅ Tìm thấy ${result.count} tasks phù hợp với yêu cầu của bạn.`,
+          facialExpression: "smile",
+          animation: "Talking_0"
+        };
+        
+      case 'update':
+      case 'priority_change':
+      case 'mark_complete':
+        return {
+          text: `✅ Đã cập nhật task "${result.updated_task?.title}" thành công!`,
+          facialExpression: "smile", 
+          animation: "Celebrating"
+        };
+        
+      case 'delete':
+        return {
+          text: `✅ Đã xóa ${result.count} task(s) thành công.`,
+          facialExpression: "smile",
+          animation: "Talking_0"
+        };
+        
+      case 'stats':
+        return {
+          text: `📊 Thống kê: ${result.stats.total_tasks} tasks, hoàn thành ${result.stats.completion_rate}%.`,
+          facialExpression: "smile",
+          animation: "Talking_1"
+        };
+        
+      default:
+        return {
+          text: "✅ Thao tác hoàn thành thành công!",
+          facialExpression: "smile",
+          animation: "default"
+        };
+    }
+  }
+
+  /**
+   * Handle task operation confirmation
+   * @param {string} userMessage - User confirmation message
+   * @param {Object} pendingConfirmation - Pending confirmation data
+   * @param {string} sessionId - Session ID
+   * @param {string} userId - User ID
+   * @param {Object} res - Express response object
+   */
+  async handleTaskOperationConfirmation(userMessage, pendingConfirmation, sessionId, userId, res) {
+    try {
+      console.log(`🔧 Handling task operation confirmation: ${pendingConfirmation.operation}`);
+      
+      const operationData = pendingConfirmation.pendingData;
+      
+      // Update operation with user confirmation if needed
+      if (pendingConfirmation.confirmationType === 'task_selection') {
+        // User provided task selection/clarification
+        operationData.taskOperation.userSelection = userMessage;
+      } else if (pendingConfirmation.confirmationType === 'update_details') {
+        // User provided additional update details
+        operationData.taskOperation.updateData.userInput = userMessage;
+      }
+      
+      // Execute the confirmed operation
+      const executionResult = await this.taskOperationService.executeTaskOperation(
+        operationData.taskOperation, 
+        userId
+      );
+      
+      console.log(`✅ Confirmed operation executed:`, executionResult.success ? 'Success' : 'Failed');
+      
+      // Generate response messages
+      let responseMessages = [];
+      
+      if (executionResult.success) {
+        responseMessages = [
+          {
+            text: "Perfect! Đã xác nhận và thực hiện thao tác thành công.",
+            facialExpression: "smile",
+            animation: "Celebrating"
+          },
+          this.createOperationSuccessMessage(operationData.operation, executionResult)
+        ];
+      } else {
+        responseMessages = [
+          {
+            text: `❌ Có lỗi khi thực hiện: ${executionResult.error}`,
+            facialExpression: "concerned",
+            animation: "default"
+          }
+        ];
+      }
+      
+      // Generate audio for messages
+      await this.audioService.generateMessagesAudio(responseMessages, "task_operation_confirmed");
+      
+      const response = createResponse(responseMessages, {
+        mode: "task_operation",
+        intent: operationData.intent,
+        confidence: operationData.confidence,
+        sessionId: sessionId,
+        operationResult: executionResult,
+        confirmed: true
+      });
+      
+      res.send(response);
+      
+    } catch (error) {
+      console.error("❌ Error in task operation confirmation:", error);
+      await this.sendErrorResponse(res, error, "task operation confirmation", sessionId);
+    }
   }
 }
