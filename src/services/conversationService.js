@@ -15,17 +15,95 @@ export class ConversationService {
 
   /**
    * Get AI Work Assistant system prompt
+   * @param {Object} userContext - User context with timezone
    * @returns {string} - System prompt
    */
-  getSystemPrompt() {
-    const today = new Date();
-    const currentDate = today.toISOString().split('T')[0]; // YYYY-MM-DD
-    const currentTime = today.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
-    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  getSystemPrompt(userContext = {}) {
+    // Handle timezone-aware dates
+    const userTimezone = userContext.timezone || 'UTC';
+    let today, currentDate, currentTime, tomorrow;
+    
+    try {
+      // Create dates in user's timezone
+      today = new Date();
+      
+      // Convert to user timezone for display
+      const userToday = new Date(today.toLocaleString("en-US", {timeZone: userTimezone}));
+      currentDate = userToday.toISOString().split('T')[0]; // YYYY-MM-DD
+      currentTime = userToday.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+      
+      const userTomorrow = new Date(userToday.getTime() + 24 * 60 * 60 * 1000);
+      tomorrow = userTomorrow.toISOString().split('T')[0];
+      
+      console.log(`🕒 Time calculation: UTC=${today.toISOString()}, User(${userTimezone})=${userToday.toISOString()}`);
+    } catch (error) {
+      console.error(`❌ Timezone calculation error:`, error);
+      // Fallback to UTC
+      today = new Date();
+      currentDate = today.toISOString().split('T')[0];
+      currentTime = today.toTimeString().split(' ')[0].substring(0, 5);
+      tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    }
 
-    return `Bạn là AI Work Assistant thông minh có thể vừa trò chuyện, vừa quản lý tasks, vừa sắp xếp công việc phức tạp.
+    return `Bạn là AI Work Assistant thông minh được cá nhân hóa cho user, có thể vừa trò chuyện, vừa quản lý tasks, vừa sắp xếp công việc.
 
-🗓️ NGÀY GIỜ HIỆN TẠI: ${currentDate} ${currentTime}
+👤 USER PROFILE & PERSONALIZATION:
+${this.buildUserPersonalizationContext(userContext)}
+
+🗓️ THỜI GIAN & TIMEZONE:
+- Hiện tại: ${currentDate} ${currentTime}
+- Ngày mai: ${tomorrow}  
+- Timezone: ${userTimezone} ${userContext.timezone ? '(from profile)' : '(default)'}
+- Working hours: ${userContext.working_hours || 'Not specified'}
+
+⏰ HƯỚNG DẪN PARSE THỜI GIAN:
+**LUÔN convert thời gian tương đối thành format cụ thể:**
+
+🕐 Thời gian trong ngày:
+- "sáng" → 08:00-11:59
+- "trưa/buổi trưa" → 12:00-13:59  
+- "chiều" → 14:00-17:59
+- "tối" → 18:00-21:59
+- "đêm" → 22:00-07:59
+
+📅 Ngày tương đối:
+- "hôm nay" → ${currentDate}
+- "mai/ngày mai" → ${tomorrow}
+- "thứ hai/tuesday" → tính toán ngày trong tuần
+- "tuần sau" → +7 ngày từ hôm nay
+
+🎯 VÍ DỤ PARSE:
+- "trưa nay lúc 12h" → dueDate: "${currentDate}", dueTime: "12:00"
+- "chiều mai 3h" → dueDate: "${tomorrow}", dueTime: "15:00" 
+- "tối nay" → dueDate: "${currentDate}", dueTime: "19:00"
+- "sáng mai 9h" → dueDate: "${tomorrow}", dueTime: "09:00"
+- "họp với giáo sư trưa nay 12h" → dueDate: "${currentDate}", dueTime: "12:00"
+
+❗ QUAN TRỌNG: KHÔNG BAO GIỜ để dueDate/dueTime = null nếu user cung cấp thời gian!
+
+🎯 PERSONALIZATION GUIDELINES:
+**Adapt your responses based on user profile:**
+
+📝 **Communication Style**: Use ${userContext.communication_style || 'friendly'} tone
+🗣️ **Interaction**: Provide ${userContext.interaction_preference || 'detailed'} responses  
+⏰ **Working Hours**: Consider user works ${userContext.working_hours || 'standard hours'}
+🎯 **Task Priorities**: User prefers ${userContext.task_priorities || 'balanced approach'}
+📚 **Learning Style**: User learns through ${userContext.learning_style || 'various methods'}
+🔔 **Reminders**: Use ${userContext.reminder_style || 'standard'} reminder style
+💬 **Feedback**: Provide ${userContext.feedback_preference || 'balanced'} feedback
+${userContext.custom_instructions ? `\n📋 **Custom Instructions**: "${userContext.custom_instructions}"` : ''}
+
+🎭 **INTERACTION PREFERENCE RULES:**
+${this.getInteractionPreferenceGuidelines(userContext.interaction_preference)}
+
+💬 **MESSAGE EXAMPLES FOR ${(userContext.interaction_preference || 'balanced').toUpperCase()} STYLE:**
+${this.getMessageExamples(userContext.interaction_preference, userContext)}
+
+**Key Behaviors**:
+- Address user by ${userContext.first_name ? `name (${userContext.first_name})` : 'friendly terms'}
+- Consider their ${userContext.occupation || 'work'} context
+- Respect their ${userContext.privacy_level || 'standard'} privacy level
+- Match their ${userContext.tech_level || 'mixed'} technical comfort level
 
 📋 OUTPUT FORMAT (chỉ JSON, không text khác):
 
@@ -42,7 +120,7 @@ export class ConversationService {
   },
   "messages": [
     {
-      "text": "conversational_response",
+      "text": "response_text_based_on_interaction_preference",
       "facialExpression": "smile|concerned|excited|thinking|surprised|funnyFace|default",
       "animation": "Talking_0|Talking_1|Talking_2|Thinking_0|Celebrating|Laughing|Rumba Dancing|Standing Idle|Terrified|Crying|Angry"
     }
@@ -247,16 +325,200 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
   }
 
   /**
+   * Build personalized context from user profile
+   * @param {Object} userContext - User context data
+   * @returns {string} - Formatted personalization context
+   */
+  buildUserPersonalizationContext(userContext) {
+    const sections = [];
+
+    // Personal Info
+    if (userContext.first_name || userContext.last_name) {
+      sections.push(`📝 Personal: ${userContext.first_name || ''} ${userContext.last_name || ''}`.trim());
+    }
+
+    // Professional Info
+    const professional = [];
+    if (userContext.occupation) professional.push(`Occupation: ${userContext.occupation}`);
+    if (userContext.company) professional.push(`Company: ${userContext.company}`);
+    if (userContext.industry) professional.push(`Industry: ${userContext.industry}`);
+    if (userContext.position_level) professional.push(`Level: ${userContext.position_level}`);
+    if (userContext.work_location) professional.push(`Location: ${userContext.work_location}`);
+    if (professional.length > 0) {
+      sections.push(`💼 Professional: ${professional.join(', ')}`);
+    }
+
+    // Work Style & Communication
+    const workStyle = [];
+    if (userContext.work_style) workStyle.push(`Work style: ${userContext.work_style}`);
+    if (userContext.communication_style) workStyle.push(`Communication: ${userContext.communication_style}`);
+    if (userContext.interaction_preference) workStyle.push(`Interaction: ${userContext.interaction_preference}`);
+    if (workStyle.length > 0) {
+      sections.push(`🎯 Work Style: ${workStyle.join(', ')}`);
+    }
+
+    // Goals & Motivation  
+    const goals = [];
+    if (userContext.primary_goals && userContext.primary_goals.length > 0) {
+      goals.push(`Primary goals: [${userContext.primary_goals.join(', ')}]`);
+    }
+    if (userContext.task_priorities) goals.push(`Task priority: ${userContext.task_priorities}`);
+    if (userContext.planning_horizon) goals.push(`Planning: ${userContext.planning_horizon}`);
+    if (userContext.motivation_factors && userContext.motivation_factors.length > 0) {
+      goals.push(`Motivation: [${userContext.motivation_factors.join(', ')}]`);
+    }
+    if (goals.length > 0) {
+      sections.push(`🎯 Goals & Motivation: ${goals.join(', ')}`);
+    }
+
+    // Learning & Growth
+    const learning = [];
+    if (userContext.learning_style) learning.push(`Learning style: ${userContext.learning_style}`);
+    if (userContext.interests && userContext.interests.length > 0) {
+      learning.push(`Interests: [${userContext.interests.join(', ')}]`);
+    }
+    if (userContext.stress_management && userContext.stress_management.length > 0) {
+      learning.push(`Stress management: [${userContext.stress_management.join(', ')}]`);
+    }
+    if (learning.length > 0) {
+      sections.push(`📚 Learning & Growth: ${learning.join(', ')}`);
+    }
+
+    // AI Preferences
+    const aiPrefs = [];
+    if (userContext.reminder_style) aiPrefs.push(`Reminder style: ${userContext.reminder_style}`);
+    if (userContext.feedback_preference) aiPrefs.push(`Feedback: ${userContext.feedback_preference}`);
+    if (userContext.privacy_level) aiPrefs.push(`Privacy: ${userContext.privacy_level}`);
+    if (userContext.tech_level) aiPrefs.push(`Tech level: ${userContext.tech_level}`);
+    if (userContext.device_usage) aiPrefs.push(`Device: ${userContext.device_usage}`);
+    if (aiPrefs.length > 0) {
+      sections.push(`🤖 AI Preferences: ${aiPrefs.join(', ')}`);
+    }
+
+    // Custom Instructions
+    if (userContext.custom_instructions) {
+      sections.push(`📋 Custom Instructions: "${userContext.custom_instructions}"`);
+    }
+
+    // Language & Communication
+    if (userContext.language_preference) {
+      sections.push(`🌐 Language: ${userContext.language_preference}`);
+    }
+
+    return sections.length > 0 ? sections.join('\n') : 'No personalization data available - using default settings';
+  }
+
+  /**
+   * Get interaction preference guidelines for ChatGPT
+   * @param {string} preference - User interaction preference
+   * @returns {string} - Formatted guidelines
+   */
+  getInteractionPreferenceGuidelines(preference) {
+    switch (preference) {
+      case 'detailed':
+        return `
+📋 **CHI TIẾT MODE** - Detailed responses:
+- Provide comprehensive explanations with step-by-step breakdown
+- Include multiple options and alternatives when possible
+- Give detailed context and reasoning behind suggestions
+- Use structured format with clear sections and bullet points
+- Explain potential consequences and considerations
+- Example: "Để hoàn thành task này, bạn có thể làm theo 3 bước: 1) Chuẩn bị... 2) Thực hiện... 3) Kiểm tra..."
+- Always include "why" behind recommendations
+- Offer additional resources or next steps`;
+
+      case 'concise':
+        return `
+⚡ **SÚC TÍCH MODE** - Concise responses:
+- Keep responses short and direct, maximum 1-2 sentences
+- Focus on essential information only, no extra explanations
+- Use bullet points for multiple items
+- Get straight to the point without context
+- Example: "Task deadline: 2PM. Priority: High. Next action: Call client."
+- Avoid elaborations unless specifically asked
+- Use action-oriented language`;
+
+      case 'conversational':
+        return `
+💬 **TRÒ CHUYỆN MODE** - Conversational responses:
+- Use natural, friendly tone like talking to a friend
+- Include casual expressions and encouraging words
+- Ask follow-up questions to engage user
+- Use emojis and casual language appropriately
+- Example: "Hey! Nhớ gọi cho client lúc 2PM nhé. Việc này quan trọng đấy!"
+- Show empathy and understanding
+- Make responses feel personal and warm
+- Use Vietnamese casual expressions naturally`;
+
+      default:
+        return `
+📝 **BALANCED MODE** - Standard detailed responses:
+- Provide clear but not overly lengthy explanations
+- Balance information with readability
+- Use structured format when helpful`;
+    }
+  }
+
+  /**
+   * Get message examples for interaction preferences
+   * @param {string} preference - User interaction preference
+   * @returns {string} - Message examples
+   */
+  getMessageExamples(preference, userContext = {}) {
+    switch (preference) {
+      case 'detailed':
+        return `
+**DETAILED MESSAGE EXAMPLES:**
+✅ Task Creation: "Tôi đã tạo task 'Họp với giáo sư' cho bạn với các chi tiết sau: Thời gian là hôm nay 12:00, category Meeting, priority Medium. Để chuẩn bị tốt cho cuộc họp, bạn nên: 1) Review agenda trước, 2) Chuẩn bị câu hỏi, 3) Mang theo tài liệu cần thiết. Bạn có muốn tôi thêm reminder 15 phút trước không?"
+- Use: facialExpression: "thinking", animation: "Talking_1"
+
+✅ Task Update: "Task đã được cập nhật thành công! Những thay đổi bao gồm: Priority từ Medium → High, deadline moved từ 2PM → 4PM. Lý do tôi suggest giữ priority cao là vì task này ảnh hưởng đến timeline của project. Bạn có cần tôi điều chỉnh các task khác để phù hợp không?"
+- Use: facialExpression: "smile", animation: "Talking_2"`;
+
+      case 'concise':
+        return `
+**CONCISE MESSAGE EXAMPLES:**
+✅ Task Creation: "✓ Tạo task 'Họp giáo sư' - 12:00 hôm nay. Reminder: 11:45."
+- Use: facialExpression: "default", animation: "Talking_0"
+
+✅ Task Update: "✓ Updated: Priority → High, Time → 4PM."
+- Use: facialExpression: "smile", animation: "Talking_0"
+
+✅ Error: "❌ Task not found. Check ID."
+- Use: facialExpression: "concerned", animation: "Talking_0"`;
+
+      case 'conversational':
+        return `
+**CONVERSATIONAL MESSAGE EXAMPLES:**
+✅ Task Creation: "Hey ${userContext.first_name || 'bạn'}! 😊 Mình đã tạo task họp với giáo sư lúc 12h trưa hôm nay rồi nè! Cuộc họp này nghe có vẻ quan trọng đấy. Bạn có muốn mình nhắc nhở trước 15 phút không? Chúc bạn họp thành công nhé! 🎯"
+- Use: facialExpression: "smile", animation: "Celebrating"
+
+✅ Task Update: "Wow! 🎉 Task đã được update xong rồi đó! Priority giờ là High rồi, thời gian chuyển sang 4PM. Hình như việc này khá gấp nhỉ? Mình sẽ giúp bạn theo dõi thật kỹ! Còn việc gì khác cần support không? 😄"
+- Use: facialExpression: "excited", animation: "Talking_2"
+
+✅ Encouragement: "Chà! Bạn đã hoàn thành 5 tasks hôm nay rồi đấy! 🚀 Productive quá! Giờ nghỉ ngơi một chút đi, deserve it mà! ☕"
+- Use: facialExpression: "smile", animation: "Laughing"`;
+
+      default:
+        return `
+**BALANCED MESSAGE EXAMPLES:**
+✅ Task Creation: "Đã tạo thành công task 'Họp với giáo sư' vào 12:00 hôm nay. Task được set priority Medium và category Meeting. Bạn muốn thêm reminder không?"
+- Use: facialExpression: "smile", animation: "Talking_1"`;
+    }
+  }
+
+  /**
    * Initialize or get session
    * @param {string} sessionId - Session ID
+   * @param {Object} userContext - User context for system prompt
    * @returns {Array} - Message history
    */
-  getSession(sessionId) {
+  getSession(sessionId, userContext = {}) {
     if (!this.sessions.has(sessionId)) {
       this.sessions.set(sessionId, [
         {
           role: "system",
-          content: this.getSystemPrompt()
+          content: this.getSystemPrompt(userContext)
         }
       ]);
     }
@@ -281,6 +543,81 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
     }
     
     this.sessions.set(sessionId, messageHistory);
+  }
+
+  /**
+   * Fetch user profile with timezone
+   * @param {string} userId - User ID
+   * @returns {Object} - User profile data
+   */
+  async fetchUserProfile(userId) {
+    try {
+      console.log(`👤 Fetching user profile for user: ${userId}`);
+      
+      const response = await axios.get(`${config.pythonApi.url}/api/v1/onboarding/profile/${userId}`, {
+        timeout: config.pythonApi.timeout,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Source': 'nodejs-server'
+        }
+      });
+
+      const profile = response.data || {};
+      console.log(`✅ Fetched user profile: ${profile.first_name || 'Unknown'}, timezone=${profile.timezone || 'UTC'}`);
+      
+      // Return comprehensive personalization data
+      return {
+        // Personal Info
+        first_name: profile.first_name,
+        last_name: profile.last_name,
+        
+        // Professional Info  
+        occupation: profile.occupation,
+        company: profile.company,
+        industry: profile.industry,
+        position_level: profile.position_level,
+        work_location: profile.work_location,
+        
+        // Work Style & Communication
+        work_style: profile.work_style,
+        communication_style: profile.communication_style,
+        interaction_preference: profile.interaction_preference,
+        working_hours: profile.working_hours,
+        break_style: profile.break_style,
+        
+        // Goals & Motivation
+        primary_goals: profile.primary_goals || [],
+        task_priorities: profile.task_priorities,
+        planning_horizon: profile.planning_horizon,
+        success_metrics: profile.success_metrics || [],
+        motivation_factors: profile.motivation_factors || [],
+        
+        // Learning & Growth
+        interests: profile.interests || [],
+        learning_style: profile.learning_style,
+        stress_management: profile.stress_management || [],
+        
+        // Technical Preferences
+        timezone: profile.timezone || 'UTC',
+        language_preference: profile.language_preference || 'en',
+        device_usage: profile.device_usage,
+        tech_level: profile.tech_level,
+        notification_preferences: profile.notification_preferences || [],
+        
+        // AI Assistant Settings
+        custom_instructions: profile.custom_instructions,
+        reminder_style: profile.reminder_style,
+        feedback_preference: profile.feedback_preference,
+        privacy_level: profile.privacy_level
+      };
+
+    } catch (error) {
+      console.error(`❌ Error fetching user profile for ${userId}:`, error.message);
+      return {
+        timezone: 'UTC',
+        language_preference: 'en'
+      };
+    }
   }
 
   /**
@@ -337,7 +674,14 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
    * @returns {Object} - AI response
    */
   async processConversation(userMessage, sessionId, userId = null) {
-    const messageHistory = this.getSession(sessionId);
+    // Fetch user profile for timezone if userId provided
+    let userContext = {};
+    if (userId) {
+      userContext = await this.fetchUserProfile(userId);
+      console.log(`🌍 Using user timezone: ${userContext.timezone}`);
+    }
+    
+    const messageHistory = this.getSession(sessionId, userContext);
     
     // Fetch existing tasks if userId provided and it's a task/scheduling related intent
     let existingTasksContext = "";

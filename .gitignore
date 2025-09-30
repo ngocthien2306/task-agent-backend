@@ -1,5 +1,5 @@
 .env
 node_modules
 bin
-audios/message_*
 rhubarb_window
+audios
