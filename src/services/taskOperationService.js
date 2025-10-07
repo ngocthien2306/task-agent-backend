@@ -13,16 +13,87 @@ export class TaskOperationService {
    * Get specialized prompt for task operations
    * @returns {string} - Task operation system prompt
    */
-  getTaskOperationPrompt() {
-    const today = new Date();
-    const currentDate = today.toISOString().split('T')[0];
-    const currentTime = today.toTimeString().split(' ')[0].substring(0, 5);
+  getTaskOperationPrompt(userContext = {}) {
 
-    return `Bạn là Task Operation Assistant chuyên về quản lý và thao tác với tasks hiện có.
+    const userTimezone = userContext.timezone || 'UTC';
+    let today, currentDate, currentTime, tomorrow;
+    let thisMonday, thisTuesday, thisWednesday, thisThursday, thisFriday, thisSaturday, thisSunday;
+    
+    try {
+      // Create dates in user's timezone using Intl.DateTimeFormat
+      today = new Date();
+      
+      // Get date components in user's timezone
+      const userDateFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: userTimezone,
+        year: 'numeric',
+        month: '2-digit', 
+        day: '2-digit'
+      });
+      
+      const userTimeFormatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: userTimezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      
+      // Format date and time in user's timezone
+      currentDate = userDateFormatter.format(today); // YYYY-MM-DD
+      currentTime = userTimeFormatter.format(today); // HH:MM
+      
+      // Calculate tomorrow in user's timezone
+      const tomorrowDate = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+      tomorrow = userDateFormatter.format(tomorrowDate);
+      
+      // Calculate weekdays for this week
+      const todayDayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+      const daysToMonday = todayDayOfWeek === 0 ? -6 : 1 - todayDayOfWeek;
+      const mondayThisWeek = new Date(today.getTime() + daysToMonday * 24 * 60 * 60 * 1000);
+      
+      thisMonday = userDateFormatter.format(mondayThisWeek);
+      thisTuesday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 1 * 24 * 60 * 60 * 1000));
+      thisWednesday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 2 * 24 * 60 * 60 * 1000));
+      thisThursday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 3 * 24 * 60 * 60 * 1000));
+      thisFriday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 4 * 24 * 60 * 60 * 1000));
+      thisSaturday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 5 * 24 * 60 * 60 * 1000));
+      thisSunday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 6 * 24 * 60 * 60 * 1000));
+      
+      console.log(`🕒 Time calculation: UTC=${today.toISOString()}, User(${userTimezone}): ${currentDate} ${currentTime}, Tomorrow: ${tomorrow}`);
+      console.log(`📅 This week: Mon=${thisMonday}, Fri=${thisFriday}, Sat=${thisSaturday}, Sun=${thisSunday}`);
+    } catch (error) {
+      console.error(`❌ Timezone calculation error:`, error);
+      // Fallback to UTC
+      today = new Date();
+      currentDate = today.toISOString().split('T')[0];
+      currentTime = today.toTimeString().split(' ')[0].substring(0, 5);
+      tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      
+      // Fallback weekday calculations
+      const todayDayOfWeek = today.getDay();
+      const daysToMonday = todayDayOfWeek === 0 ? -6 : 1 - todayDayOfWeek;
+      const mondayThisWeek = new Date(today.getTime() + daysToMonday * 24 * 60 * 60 * 1000);
+      
+      thisMonday = mondayThisWeek.toISOString().split('T')[0];
+      thisTuesday = new Date(mondayThisWeek.getTime() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisWednesday = new Date(mondayThisWeek.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisThursday = new Date(mondayThisWeek.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisFriday = new Date(mondayThisWeek.getTime() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisSaturday = new Date(mondayThisWeek.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisSunday = new Date(mondayThisWeek.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    }
 
-🗓️ NGÀY GIỜ HIỆN TẠI: ${currentDate} ${currentTime}
+
+    return `Bạn là Task Operation Assistant chuyên về quản lý và thao tác với tasks hiện có cho ${userContext.first_name || 'user'} ${userContext.occupation || 'work'} context..
+
+
+⏰ NGÀY GIỜ HIỆN TẠI: ${currentDate} ${currentTime} (${userTimezone}) | Tomorrow: ${tomorrow}
+Thứ 2: ${thisMonday}
+Chủ nhật: ${thisSunday}
 
 📋 OUTPUT FORMAT (chỉ JSON, không text khác):
+👤 STYLE: ${userContext.communication_style || 'friendly'} tone, ${userContext.interaction_preference || 'detailed'} responses
+
 
 {
   "operation": "query|update|delete|priority_change|mark_complete|stats",
@@ -35,6 +106,19 @@ export class TaskOperationService {
       "text": "response_message",
       "facialExpression": "smile|concerned|thinking|surprised",
       "animation": "Talking_0|Talking_1|Thinking_0|Celebrating"
+    }
+  ],
+  "tasks": [
+    {
+      "title": "Task title",
+      "description": "Detailed description", 
+      "priority": "high|medium|low",
+      "category": "meeting|work|personal|health|shopping|social",
+      "status": "pending|in_progress|completed",
+      "tags": ["tag1", "tag2"],
+      "due_date": "2024-01-15",
+      "due_time": "14:30",
+      "estimated_duration": 60
     }
   ],
   "taskOperation": {
@@ -75,6 +159,8 @@ export class TaskOperationService {
 - "Xem tasks hôm nay", "Task nào còn pending?", "Tasks urgent?"
 - Phân tích user input để xác định filters
 - Hiển thị kết quả với format dễ đọc
+- Dựa vào thời gian đã cung cấp và câu hỏi của nguời dùng để trả ra đúng task của thời gian đó
+    - Ví dụ: Hôm nay có bao nhiêu task? hiện tại bạn được user input 7 tasks nhưng có 3 task trong ngày hôm nay (dựa vào ngày hiện tại đã cung cấp)
 
 **UPDATE** - Sửa đổi task hiện có:
 - "Đổi priority task X thành urgent", "Hoàn thành task Y"
@@ -252,8 +338,8 @@ Input: "Xóa task báo cáo"
    * @param {string} sessionId - Session ID
    * @returns {Object} - Task operation response
    */
-  async processTaskOperation(userMessage, existingTasks, sessionId) {
-    const systemPrompt = this.getTaskOperationPrompt();
+  async processTaskOperation(userMessage, existingTasks, sessionId, userContext={}) {
+    const systemPrompt = this.getTaskOperationPrompt(userContext);
     
     // Format existing tasks for context
     const tasksContext = existingTasks.length > 0 

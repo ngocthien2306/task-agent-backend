@@ -19,23 +19,61 @@ export class ConversationService {
    * @returns {string} - System prompt
    */
   getSystemPrompt(userContext = {}) {
+    console.log(`📋 getSystemPrompt called with userContext:`, {
+      hasData: Object.keys(userContext).length > 0,
+      timezone: userContext.timezone,
+      name: `${userContext.first_name || ''} ${userContext.last_name || ''}`.trim(),
+      communication_style: userContext.communication_style,
+      interaction_preference: userContext.interaction_preference
+    });
+
     // Handle timezone-aware dates
     const userTimezone = userContext.timezone || 'UTC';
     let today, currentDate, currentTime, tomorrow;
+    let thisMonday, thisTuesday, thisWednesday, thisThursday, thisFriday, thisSaturday, thisSunday;
     
     try {
-      // Create dates in user's timezone
+      // Create dates in user's timezone using Intl.DateTimeFormat
       today = new Date();
       
-      // Convert to user timezone for display
-      const userToday = new Date(today.toLocaleString("en-US", {timeZone: userTimezone}));
-      currentDate = userToday.toISOString().split('T')[0]; // YYYY-MM-DD
-      currentTime = userToday.toTimeString().split(' ')[0].substring(0, 5); // HH:MM
+      // Get date components in user's timezone
+      const userDateFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: userTimezone,
+        year: 'numeric',
+        month: '2-digit', 
+        day: '2-digit'
+      });
       
-      const userTomorrow = new Date(userToday.getTime() + 24 * 60 * 60 * 1000);
-      tomorrow = userTomorrow.toISOString().split('T')[0];
+      const userTimeFormatter = new Intl.DateTimeFormat('en-GB', {
+        timeZone: userTimezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
       
-      console.log(`🕒 Time calculation: UTC=${today.toISOString()}, User(${userTimezone})=${userToday.toISOString()}`);
+      // Format date and time in user's timezone
+      currentDate = userDateFormatter.format(today); // YYYY-MM-DD
+      currentTime = userTimeFormatter.format(today); // HH:MM
+      
+      // Calculate tomorrow in user's timezone
+      const tomorrowDate = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+      tomorrow = userDateFormatter.format(tomorrowDate);
+      
+      // Calculate weekdays for this week
+      const todayDayOfWeek = today.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+      const daysToMonday = todayDayOfWeek === 0 ? -6 : 1 - todayDayOfWeek;
+      const mondayThisWeek = new Date(today.getTime() + daysToMonday * 24 * 60 * 60 * 1000);
+      
+      thisMonday = userDateFormatter.format(mondayThisWeek);
+      thisTuesday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 1 * 24 * 60 * 60 * 1000));
+      thisWednesday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 2 * 24 * 60 * 60 * 1000));
+      thisThursday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 3 * 24 * 60 * 60 * 1000));
+      thisFriday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 4 * 24 * 60 * 60 * 1000));
+      thisSaturday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 5 * 24 * 60 * 60 * 1000));
+      thisSunday = userDateFormatter.format(new Date(mondayThisWeek.getTime() + 6 * 24 * 60 * 60 * 1000));
+      
+      console.log(`🕒 Time calculation: UTC=${today.toISOString()}, User(${userTimezone}): ${currentDate} ${currentTime}, Tomorrow: ${tomorrow}`);
+      console.log(`📅 This week: Mon=${thisMonday}, Fri=${thisFriday}, Sat=${thisSaturday}, Sun=${thisSunday}`);
     } catch (error) {
       console.error(`❌ Timezone calculation error:`, error);
       // Fallback to UTC
@@ -43,70 +81,51 @@ export class ConversationService {
       currentDate = today.toISOString().split('T')[0];
       currentTime = today.toTimeString().split(' ')[0].substring(0, 5);
       tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      
+      // Fallback weekday calculations
+      const todayDayOfWeek = today.getDay();
+      const daysToMonday = todayDayOfWeek === 0 ? -6 : 1 - todayDayOfWeek;
+      const mondayThisWeek = new Date(today.getTime() + daysToMonday * 24 * 60 * 60 * 1000);
+      
+      thisMonday = mondayThisWeek.toISOString().split('T')[0];
+      thisTuesday = new Date(mondayThisWeek.getTime() + 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisWednesday = new Date(mondayThisWeek.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisThursday = new Date(mondayThisWeek.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisFriday = new Date(mondayThisWeek.getTime() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisSaturday = new Date(mondayThisWeek.getTime() + 5 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      thisSunday = new Date(mondayThisWeek.getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     }
 
-    return `Bạn là AI Work Assistant thông minh được cá nhân hóa cho user, có thể vừa trò chuyện, vừa quản lý tasks, vừa sắp xếp công việc.
+    // Build personalization context
+    const personalizationContext = this.buildUserPersonalizationContext(userContext);
 
-👤 USER PROFILE & PERSONALIZATION:
-${this.buildUserPersonalizationContext(userContext)}
+    return `AI Work Assistant cho ${userContext.first_name || 'user'} - ${userContext.occupation || 'work'} context.
 
-🗓️ THỜI GIAN & TIMEZONE:
-- Hiện tại: ${currentDate} ${currentTime}
-- Ngày mai: ${tomorrow}  
-- Timezone: ${userTimezone} ${userContext.timezone ? '(from profile)' : '(default)'}
-- Working hours: ${userContext.working_hours || 'Not specified'}
+⏰ TIME: ${currentDate} ${currentTime} (${userTimezone}) | Tomorrow: ${tomorrow}
+👤 STYLE: ${userContext.communication_style || 'friendly'} tone, ${userContext.interaction_preference || 'detailed'} responses
+${userContext.custom_instructions ? `📋 Custom: "${userContext.custom_instructions.substring(0, 100)}..."` : ''}
 
-⏰ HƯỚNG DẪN PARSE THỜI GIAN:
-**LUÔN convert thời gian tương đối thành format cụ thể:**
+${personalizationContext ? `🎯 USER PROFILE:\n${personalizationContext}\n` : ''}
 
-🕐 Thời gian trong ngày:
-- "sáng" → 08:00-11:59
-- "trưa/buổi trưa" → 12:00-13:59  
-- "chiều" → 14:00-17:59
-- "tối" → 18:00-21:59
-- "đêm" → 22:00-07:59
+🕐 TIME PARSING (CRITICAL - Never null if time given):
+- "trưa nay 12h" → dueDate:"${currentDate}", dueTime:"12:00"
+- "sáng/trưa/chiều/tối" → 08:00/12:00/15:00/19:00
+- "hôm nay/mai" → ${currentDate}/${tomorrow}
 
-📅 Ngày tương đối:
-- "hôm nay" → ${currentDate}
-- "mai/ngày mai" → ${tomorrow}
-- "thứ hai/tuesday" → tính toán ngày trong tuần
-- "tuần sau" → +7 ngày từ hôm nay
+🎭 RESPONSE STYLE - ${userContext.interaction_preference || 'balanced'}:
+${this.getCompactStyleGuide(userContext.interaction_preference, userContext)}
 
-🎯 VÍ DỤ PARSE:
-- "trưa nay lúc 12h" → dueDate: "${currentDate}", dueTime: "12:00"
-- "chiều mai 3h" → dueDate: "${tomorrow}", dueTime: "15:00" 
-- "tối nay" → dueDate: "${currentDate}", dueTime: "19:00"
-- "sáng mai 9h" → dueDate: "${tomorrow}", dueTime: "09:00"
-- "họp với giáo sư trưa nay 12h" → dueDate: "${currentDate}", dueTime: "12:00"
+📋 OUTPUT JSON: {mode, intent, confidence, needsConfirmation, messages: [{text, facialExpression, animation}], taskAction: {action, tasks: [{title, description, priority, category, dueDate, dueTime, status, tags, subtasks, reminders}]}, schedulingAction}
 
-❗ QUAN TRỌNG: KHÔNG BAO GIỜ để dueDate/dueTime = null nếu user cung cấp thời gian!
-
-🎯 PERSONALIZATION GUIDELINES:
-**Adapt your responses based on user profile:**
-
-📝 **Communication Style**: Use ${userContext.communication_style || 'friendly'} tone
-🗣️ **Interaction**: Provide ${userContext.interaction_preference || 'detailed'} responses  
-⏰ **Working Hours**: Consider user works ${userContext.working_hours || 'standard hours'}
-🎯 **Task Priorities**: User prefers ${userContext.task_priorities || 'balanced approach'}
-📚 **Learning Style**: User learns through ${userContext.learning_style || 'various methods'}
-🔔 **Reminders**: Use ${userContext.reminder_style || 'standard'} reminder style
-💬 **Feedback**: Provide ${userContext.feedback_preference || 'balanced'} feedback
-${userContext.custom_instructions ? `\n📋 **Custom Instructions**: "${userContext.custom_instructions}"` : ''}
-
-🎭 **INTERACTION PREFERENCE RULES:**
-${this.getInteractionPreferenceGuidelines(userContext.interaction_preference)}
-
-💬 **MESSAGE EXAMPLES FOR ${(userContext.interaction_preference || 'balanced').toUpperCase()} STYLE:**
-${this.getMessageExamples(userContext.interaction_preference, userContext)}
-
-**Key Behaviors**:
-- Address user by ${userContext.first_name ? `name (${userContext.first_name})` : 'friendly terms'}
-- Consider their ${userContext.occupation || 'work'} context
-- Respect their ${userContext.privacy_level || 'standard'} privacy level
-- Match their ${userContext.tech_level || 'mixed'} technical comfort level
+⚠️ CRITICAL: 
+- ALWAYS include both taskAction and schedulingAction in response, even if action is "none"
+- For learning plans: ALWAYS create MULTIPLE tasks (3-5 tasks) in tasks array
+- ALWAYS include dueDate and dueTime for each task (use ${currentDate}, ${tomorrow}, weekdays: ${thisMonday}-${thisSunday}) hãy tính toán ngày cho đúng
+- ALWAYS include relevant referenceLinks for tasks that benefit from additional resources (learning, work, research, health, shopping, etc.) with real, helpful URLs, ít nhất 2 tài liệu tham khảo
 
 📋 OUTPUT FORMAT (chỉ JSON, không text khác):
 
+GENERAL FORMAT:
 {
   "mode": "conversation|simple_task|scheduling",
   "intent": "brief_description_of_user_intent",
@@ -127,24 +146,32 @@ ${this.getMessageExamples(userContext.interaction_preference, userContext)}
   ],
   "taskAction": {
     "action": "create|update|delete|query|none",
-    "task": {
-      "title": "task_title",
-      "description": "task_description", 
-      "priority": "low|medium|high|urgent",
-      "category": "work|personal|health|learning|shopping|entertainment|other",
-      "dueDate": "YYYY-MM-DD_or_null",
-      "dueTime": "HH:MM_or_null",
-      "status": "pending|in_progress|completed|cancelled",
-      "tags": ["keyword1", "keyword2"],
-      "subtasks": ["subtask1", "subtask2"],
-      "reminders": [
-        {
-          "type": "time",
-          "beforeDue": "15m|30m|1h|2h|1d",
-          "message": "reminder_text"
-        }
-      ]
-    }
+    "tasks": [
+      {
+        "title": "task_title",
+        "description": "task_description", 
+        "priority": "low|medium|high|urgent",
+        "category": "work|personal|health|learning|meeting|deep_work|communication|admin|break|shopping|entertainment|other",
+        "dueDate": "YYYY-MM-DD_or_null",
+        "dueTime": "HH:MM_or_null",
+        "status": "pending|in_progress|completed|cancelled",
+        "tags": ["keyword1", "keyword2"],
+        "subtasks": ["subtask1", "subtask2"],
+        "reminders": [
+          {
+            "type": "time",
+            "beforeDue": "15m|30m|1h|2h|1d",
+            "message": "reminder_text"
+          }
+        ],
+        "referenceLinks": [
+          {
+            "title": "Resource Title",
+            "url": "https://example.com/resource"
+          }
+        ]
+      }
+    ]
   },
   "schedulingAction": {
     "type": "daily_planning|rescheduling|weekly_planning|none",
@@ -152,12 +179,19 @@ ${this.getMessageExamples(userContext.interaction_preference, userContext)}
     "timeScope": "today|tomorrow|this_week|next_week|null",
     "tasks": [
       {
+        // UNIFIED STRUCTURE - same as taskAction.tasks + scheduling fields
         "title": "task_title",
+        "description": "task_description",
+        "priority": "low|medium|high|urgent",
+        "category": "work|personal|health|learning|meeting|deep_work|communication|admin|break|shopping|entertainment|other",
+        "dueDate": "YYYY-MM-DD_or_null",
+        "dueTime": "HH:MM_or_null",
+        "status": "pending|in_progress|completed|cancelled",
+        "tags": ["keyword1", "keyword2"],
+        // Scheduling-specific fields:
         "startTime": "HH:MM_or_null",
         "endTime": "HH:MM_or_null",
         "duration": "minutes_estimated",
-        "priority": "low|medium|high|urgent",
-        "category": "meeting|deep_work|communication|admin|break",
         "flexibility": "fixed|flexible|preferred_time"
       }
     ],
@@ -184,14 +218,21 @@ ${this.getMessageExamples(userContext.interaction_preference, userContext)}
 - Basic reminders: "Nhắc tôi mua sữa"
 - Task updates: "Đánh dấu task X completed"
 - Task queries: "Tasks hôm nay có gì?"
-- 1-3 isolated tasks, no complex scheduling needed
+- LEARNING PLANS: "Kế hoạch học deep learning", "Study plan for React", "Lên kế hoạch học tiếng Anh"
+- CREATE MULTIPLE SPECIFIC TASKS (3-5 tasks) for learning plans, NOT generic templates
+- 1-5 isolated tasks, no complex scheduling needed
 
 📅 SCHEDULING MODE:
 - Multiple tasks needing time allocation: "Hôm nay tôi có meeting A, task B, call C"
 - Complex planning: "Sắp xếp schedule cho tôi"
 - Rescheduling: "Meeting dời giờ, adjust lại"
-- Weekly planning: "Plan cho tuần này"
+- Weekly planning: "Tạo schedule template cho tuần" (ONLY for generic templates)
 - Time conflicts and optimization needed
+
+🚨 IMPORTANT: 
+- "Kế hoạch học", "Learning plan", "Study plan" = SIMPLE_TASK mode (create multiple specific tasks), NOT SCHEDULING mode!
+- Single assignments with deadlines: "làm bài tập X vào thứ 7" = SIMPLE_TASK mode, NOT scheduling
+- Academic tasks/homework = SIMPLE_TASK mode even if time is mentioned
 
 🚨 REQUIRED FIELDS:
 **ALWAYS include these fields in EVERY response:**
@@ -240,6 +281,122 @@ Khi process-conversation, nếu user input có thông tin mơ hồ, PHẢI hỏi
 
 ❌ Input mơ hồ: "Meeting team và viết document"
 ✅ Cần hỏi: "Meeting team lúc mấy giờ? Document gì, deadline khi nào? Thứ tự ưu tiên như thế nào?"
+
+**📚 VÍ DỤ LEARNING PLAN - SIMPLE_TASK MODE:**
+
+✅ Input: "Kế hoạch học deep learning"
+✅ Response: mode: "simple_task", taskAction: {action: "create", tasks: [array_of_multiple_tasks]}
+✅ Tạo 4-5 tasks cụ thể với THỜI GIAN:
+
+{
+  "taskAction": {
+    "action": "create",
+    "tasks": [
+      {
+        "title": "Đọc sách Deep Learning - Ian Goodfellow (Chapter 1-3)",
+        "description": "Tìm hiểu các khái niệm cơ bản về deep learning",
+        "priority": "high",
+        "category": "learning",
+        "dueDate": "${currentDate}",
+        "dueTime": "09:00",
+        "tags": ["deep-learning", "theory", "goodfellow"]
+      },
+      {
+        "title": "Hoàn thành CS231n course - Lecture 1-5", 
+        "description": "Xem video lectures và làm assignments",
+        "priority": "high",
+        "category": "learning",
+        "dueDate": "${tomorrow}",
+        "dueTime": "10:00",
+        "tags": ["cs231n", "stanford", "cnn"]
+      },
+      {
+        "title": "Code Neural Network from scratch với Python",
+        "description": "Implement basic neural network không dùng framework",
+        "priority": "medium", 
+        "category": "learning",
+        "dueDate": "${tomorrow}",
+        "dueTime": "14:00",
+        "tags": ["coding", "python", "neural-network"],
+        "subtasks": [
+          "Thiết lập môi trường Python và import thư viện",
+          "Implement forward propagation",
+          "Implement backpropagation và gradient descent",
+          "Test và optimize neural network"
+        ]
+      }
+    ]
+  },
+  "schedulingAction": {"type": "none", "action": "none"}
+}
+
+❌ KHÔNG được dùng: schedulingAction: {type: "weekly_planning"}
+✅ PHẢI có dueDate và dueTime cho mỗi task (dùng ${currentDate}, ${tomorrow}, ${thisMonday}, ${thisFriday}, v.v.) hãy tính toán 
+
+📚 REFERENCE LINKS GUIDELINES:
+🎓 LEARNING TASKS: Always include 2-3 helpful links
+- Deep Learning: official books, courses (Coursera, edX), documentation
+- Programming: official docs, tutorials, GitHub repos, Stack Overflow guides
+- Languages: official websites, interactive platforms (Duolingo, etc.)
+- Certifications: official cert pages, practice exams
+
+💼 WORK TASKS: Include relevant tools/resources
+- Project management: Jira, Trello, Asana links
+- Documentation: company wikis, official guides
+- Tools: software documentation, tutorials
+
+💪 HEALTH/FITNESS: Include reliable sources
+- Workout plans: fitness apps, YouTube channels, official guides
+- Nutrition: official health websites, meal planning tools
+
+🛒 SHOPPING: Include helpful resources
+- Price comparison sites, official product pages
+- Review sites (for research tasks)
+
+⚠️ IMPORTANT: Use REAL, working URLs - no fake links!
+
+📝 SUBTASKS GUIDELINES:
+🎯 CREATE SUBTASKS for complex tasks (estimated duration > 2 hours):
+
+🎓 LEARNING/ACADEMIC TASKS:
+Example: "Làm bài tập dự đoán hình ảnh"
+"subtasks": [
+  "Thu thập và chuẩn bị dataset", 
+  "Tiền xử lý dữ liệu hình ảnh",
+  "Thiết kế và implement model",
+  "Training và fine-tuning model", 
+  "Đánh giá kết quả và viết báo cáo"
+]
+
+💼 WORK PROJECTS:
+Example: "Tạo tính năng thanh toán"
+"subtasks": [
+  "Thiết kế database schema",
+  "Implement payment API", 
+  "Tạo UI thanh toán",
+  "Viết unit tests",
+  "Deploy và testing"
+]
+
+🔬 RESEARCH TASKS:
+Example: "Nghiên cứu về AI trong y tế"
+"subtasks": [
+  "Thu thập tài liệu nghiên cứu",
+  "Phân tích các ứng dụng hiện tại", 
+  "Tổng hợp findings",
+  "Viết báo cáo tổng kết"
+]
+
+⚡ Simple tasks (< 2 hours): NO subtasks needed
+Examples: "Chạy bộ 30 phút", "Gọi điện cho khách hàng", "Đọc email"
+
+✅ Complex tasks (> 2 hours): 3-5 specific subtasks  
+Examples: "Làm bài tập lập trình", "Nghiên cứu đề tài", "Tạo presentation"
+
+🎯 WHEN TO ADD SUBTASKS:
+- Learning projects, coding tasks, research work
+- Work projects with multiple phases  
+- Any task requiring planning or multiple steps
 
 **🔍 PHÂN TÍCH EXISTING TASKS:**
 Khi có existing tasks trong context, PHẢI kiểm tra:
@@ -325,11 +482,43 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
   }
 
   /**
+   * Get compact style guide for different interaction preferences
+   * @param {string} preference - User's interaction preference
+   * @param {Object} userContext - User context data
+   * @returns {string} - Compact style guidelines
+   */
+  getCompactStyleGuide(preference, userContext) {
+    const baseStyle = {
+      detailed: "📝 Detailed: Comprehensive responses, step-by-step guidance, anticipate needs, explain context",
+      concise: "⚡ Concise: Brief responses, key points only, minimal explanations, direct actions",
+      conversational: "💬 Conversational: Friendly tone, casual language, show personality, relatable examples"
+    };
+
+    const style = baseStyle[preference] || baseStyle['detailed'];
+    
+    // Add personalization hints
+    const hints = [];
+    if (userContext.communication_style === 'professional') hints.push("Keep formal tone");
+    if (userContext.work_style === 'analytical') hints.push("Include logical reasoning");
+    if (userContext.motivation_factors?.includes('efficiency')) hints.push("Focus on productivity");
+    
+    return hints.length > 0 ? `${style}\n💡 Hints: ${hints.join(', ')}` : style;
+  }
+
+  /**
    * Build personalized context from user profile
    * @param {Object} userContext - User context data
    * @returns {string} - Formatted personalization context
    */
   buildUserPersonalizationContext(userContext) {
+    console.log(`🎯 buildUserPersonalizationContext called with:`, {
+      hasData: Object.keys(userContext).length > 0,
+      keys: Object.keys(userContext),
+      first_name: userContext.first_name,
+      occupation: userContext.occupation,
+      timezone: userContext.timezone
+    });
+
     const sections = [];
 
     // Personal Info
@@ -514,7 +703,10 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
    * @returns {Array} - Message history
    */
   getSession(sessionId, userContext = {}) {
+    console.log(`🔍 getSession called for ${sessionId}, exists: ${this.sessions.has(sessionId)}, hasUserContext: ${Object.keys(userContext).length > 0}`);
+    
     if (!this.sessions.has(sessionId)) {
+      console.log(`🆕 Creating new session ${sessionId} in getSession with userContext`);
       this.sessions.set(sessionId, [
         {
           role: "system",
@@ -529,9 +721,10 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
    * Add message to session and limit history size
    * @param {string} sessionId - Session ID
    * @param {Object} message - Message object
+   * @param {Object} userContext - User context for system prompt update
    */
-  addMessageToSession(sessionId, message) {
-    const messageHistory = this.getSession(sessionId);
+  addMessageToSession(sessionId, message, userContext = {}) {
+    const messageHistory = this.getSession(sessionId, userContext);
     
     messageHistory.push(message);
     
@@ -543,6 +736,39 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
     }
     
     this.sessions.set(sessionId, messageHistory);
+  }
+
+  /**
+   * Update system prompt for existing session with fresh date/time
+   * @param {string} sessionId - Session ID
+   * @param {Object} userContext - User context with timezone
+   */
+  updateSystemPrompt(sessionId, userContext = {}) {
+    console.log(`🔄 updateSystemPrompt called for session ${sessionId} with userContext:`, {
+      hasData: Object.keys(userContext).length > 0,
+      timezone: userContext.timezone,
+      sessionExists: this.sessions.has(sessionId)
+    });
+
+    if (this.sessions.has(sessionId)) {
+      const messageHistory = this.sessions.get(sessionId);
+      // Update the system message (first message) with fresh prompt
+      messageHistory[0] = {
+        role: "system",
+        content: this.getSystemPrompt(userContext)
+      };
+      this.sessions.set(sessionId, messageHistory);
+      console.log(`✅ System prompt updated for existing session ${sessionId}`);
+    } else {
+      // Create new session with userContext if session doesn't exist
+      console.log(`🆕 Creating new session ${sessionId} with userContext`);
+      this.sessions.set(sessionId, [
+        {
+          role: "system",
+          content: this.getSystemPrompt(userContext)
+        }
+      ]);
+    }
   }
 
   /**
@@ -647,9 +873,9 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
         status: task.status,
         priority: task.priority,
         category: task.category,
-        due_date: task.due_date ? task.due_date.split('T')[0] : null, // YYYY-MM-DD only
-        due_time: task.due_time, // HH:MM
-        duration: task.estimated_duration // minutes
+        due_date: task.dueDate,
+        due_time: task.dueTime, // HH:MM
+        duration: task.estimatedDuration // minutes
       }));
 
       return {
@@ -671,17 +897,24 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
    * @param {string} userMessage - User message
    * @param {string} sessionId - Session ID
    * @param {string} userId - User ID for task fetching
+   * @param {Object} userContext - User profile data from FE (optional)
    * @returns {Object} - AI response
    */
-  async processConversation(userMessage, sessionId, userId = null) {
-    // Fetch user profile for timezone if userId provided
-    let userContext = {};
-    if (userId) {
+  async processConversation(userMessage, sessionId, userId = null, userContext = {}) {
+    console.log(`🔧 processConversation called with userContext:`, {
+      hasUserContext: Object.keys(userContext).length > 0,
+      timezone: userContext.timezone,
+      name: `${userContext.first_name || ''} ${userContext.last_name || ''}`.trim(),
+      communication_style: userContext.communication_style
+    });
+
+    // Use provided userContext from FE, or fetch if not provided
+    if (!userContext.timezone && userId) {
       userContext = await this.fetchUserProfile(userId);
-      console.log(`🌍 Using user timezone: ${userContext.timezone}`);
+      console.log(`🌍 Fetched user timezone: ${userContext.timezone}`);
+    } else if (userContext.timezone) {
+      console.log(`🌍 Using provided user timezone: ${userContext.timezone}`);
     }
-    
-    const messageHistory = this.getSession(sessionId, userContext);
     
     // Fetch existing tasks if userId provided and it's a task/scheduling related intent
     let existingTasksContext = "";
@@ -694,12 +927,17 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
       }
     }
     
+    // Update system prompt with fresh date/time before AI call
+    this.updateSystemPrompt(sessionId, userContext);
+    
     // Add user message with existing tasks context to history
     this.addMessageToSession(sessionId, {
       role: "user", 
       content: userMessage + existingTasksContext
-    });
+    }, userContext);
 
+    // Get updated message history
+    const messageHistory = this.getSession(sessionId, userContext);
     console.log(`🧠 Sending ${messageHistory.length} messages to OpenAI...`);
     if (existingTasksContext) {
       console.log(`📋 Including existing tasks context for conflict detection`);
@@ -719,13 +957,16 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
       console.log(`✅ OpenAI response received`);
       
       const aiResponseRaw = completion.choices[0].message.content;
+      console.log(`🔍 Raw ChatGPT response:`, aiResponseRaw);
+      
       const parsedResponse = JSON.parse(aiResponseRaw);
+      console.log(`📋 Parsed taskAction:`, JSON.stringify(parsedResponse.taskAction, null, 2));
       
       // Add AI response to conversation history
       this.addMessageToSession(sessionId, {
         role: "assistant",
         content: aiResponseRaw
-      });
+      }, userContext);
 
       return parsedResponse;
 

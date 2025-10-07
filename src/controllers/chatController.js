@@ -22,9 +22,23 @@ export class ChatController {
     const userMessage = req.body.message;
     const sessionId = req.body.sessionId || 'default';
     const userId = req.body.userId || req.body.user_id || 'anonymous';
+    const userContext = req.body.userContext || {}; // User profile data from FE
     
     console.log(`💬 New chat request from user: ${userId}, session: ${sessionId}`);
     console.log(`📝 User message: ${userMessage}`);
+    console.log(`📋 Request body keys:`, Object.keys(req.body));
+    
+    if (userContext && Object.keys(userContext).length > 0) {
+      console.log(`🌍 Received userContext from FE:`, {
+        timezone: userContext.timezone,
+        name: `${userContext.first_name || ''} ${userContext.last_name || ''}`.trim(),
+        communication_style: userContext.communication_style,
+        interaction_preference: userContext.interaction_preference,
+        occupation: userContext.occupation
+      });
+    } else {
+      console.log(`⚠️ No userContext received from FE, using fallback`);
+    }
 
     try {
       // Handle intro message if no user message
@@ -52,7 +66,7 @@ export class ChatController {
       
       try {
         // Get conversation history for context-aware classification
-        const conversationHistory = this.conversationService.getSession(sessionId);
+        const conversationHistory = this.conversationService.getSession(sessionId, userContext);
         
         // Classify user intent with conversation context
         classification = await this.intentClassifier.classifyIntent(userMessage, userId, conversationHistory);
@@ -70,11 +84,11 @@ export class ChatController {
               this.conversationService.isConfirmationResponse(userMessage, taskOperationConfirmation)) {
             console.log(`✅ Detected task operation confirmation for session ${sessionId}`);
             this.conversationService.clearPendingConfirmation(sessionId);
-            await this.handleTaskOperationConfirmation(userMessage, taskOperationConfirmation, sessionId, userId, res);
+            await this.handleTaskOperationConfirmation(userMessage, taskOperationConfirmation, sessionId, userId, res, userContext);
             return;
           }
           
-          await this.handleTaskOperations(userMessage, sessionId, userId, classification, routing, res);
+          await this.handleTaskOperations(userMessage, sessionId, userId, classification, routing, res, userContext);
           return;
         }
         
@@ -98,7 +112,7 @@ export class ChatController {
               
               let finalResponse;
               try {
-                finalResponse = await this.conversationService.processConversation(combinedInput, sessionId, userId);
+                finalResponse = await this.conversationService.processConversation(combinedInput, sessionId, userId, userContext);
               } catch (error) {
                 console.log(`⚠️ OpenAI failed for confirmation, using merged pending data`);
                 finalResponse = this.conversationService.mergeConfirmationData(userMessage, pendingConfirmation);
@@ -111,33 +125,56 @@ export class ChatController {
               await this.audioService.generateMessagesAudio(messages, "confirmation");
               
               // Send to Python API immediately (no more confirmation needed)
-              this.conversationService.addToBackgroundQueue({
-                type: 'confirmation_completion',
-                userInput: combinedInput,
-                aiResponse: finalResponse,
-                sessionId: sessionId,
-                userId: userId,
-                isConfirmed: true
-              });
+              let confirmationResult = null;
+              try {
+                confirmationResult = await this.conversationService.sendToPythonAPI(combinedInput, finalResponse, sessionId, userId);
+                console.log(`📤 Confirmation Python API result:`, confirmationResult.success ? 'Success' : 'Failed');
+              } catch (error) {
+                console.error(`❌ Confirmation Python API failed, adding to background queue:`, error.message);
+                this.conversationService.addToBackgroundQueue({
+                  type: 'confirmation_completion',
+                  userInput: combinedInput,
+                  aiResponse: finalResponse,
+                  sessionId: sessionId,
+                  userId: userId,
+                  isConfirmed: true
+                });
+              }
               
               console.log(`🚀 Sending confirmed response with ${messages.length} messages`);
-              const response = createResponse(messages, {
+              
+              // Prepare confirmation response data
+              const confirmationResponseData = {
                 mode: finalResponse.mode,
                 intent: finalResponse.intent,
                 confidence: finalResponse.confidence,
                 sessionId: sessionId,
-                processing: "confirmed_and_queued",
+                processing: confirmationResult?.success ? "confirmed_and_processed" : "confirmed_and_queued",
                 classification: classification,
                 routing: routing
-              });
+              };
+
+              // Add taskData if tasks were created in confirmation (regardless of Python API result)
+              if (finalResponse.taskAction?.action === "create" && finalResponse.taskAction?.tasks?.length > 0) {
+                confirmationResponseData.taskData = {
+                  operation: 'create',
+                  tasks: finalResponse.taskAction.tasks,
+                  count: finalResponse.taskAction.tasks.length,
+                  displayType: 'toast'
+                };
+                
+                console.log(`📋 Adding confirmed taskData to response: ${finalResponse.taskAction.tasks.length} tasks created`);
+              }
+
+              const response = createResponse(messages, confirmationResponseData);
               
               res.send(response);
               return;
             }
             
             // ===== NORMAL CONVERSATION PROCESSING =====
-            // Process conversation with OpenAI, including userId for task fetching
-            const parsedResponse = await this.conversationService.processConversation(userMessage, sessionId, userId);
+            // Process conversation with OpenAI, including userId for task fetching and userContext from FE
+            const parsedResponse = await this.conversationService.processConversation(userMessage, sessionId, userId, userContext);
             
             // Extract messages
             let messages = parsedResponse.messages || [parsedResponse];
@@ -179,26 +216,50 @@ export class ChatController {
             }
 
             // ===== NO CONFIRMATION NEEDED - PROCESS NORMALLY =====
-            // Add to background queue for database processing
-            this.conversationService.addToBackgroundQueue({
-              type: 'conversation_processing',
-              userInput: userMessage,
-              aiResponse: parsedResponse,
-              sessionId: sessionId,
-              userId: userId,
-              messageCount: messages.length
-            });
+            // Send to Python API and get result for immediate response
+            let pythonApiResult = null;
+            try {
+              pythonApiResult = await this.conversationService.sendToPythonAPI(userMessage, parsedResponse, sessionId, userId);
+              console.log(`📤 Python API result:`, pythonApiResult.success ? 'Success' : 'Failed');
+            } catch (error) {
+              console.error(`❌ Python API failed, adding to background queue:`, error.message);
+              // Add to background queue for database processing as fallback
+              this.conversationService.addToBackgroundQueue({
+                type: 'conversation_processing',
+                userInput: userMessage,
+                aiResponse: parsedResponse,
+                sessionId: sessionId,
+                userId: userId,
+                messageCount: messages.length
+              });
+            }
 
             console.log(`🚀 Sending response with ${messages.length} messages`);
-            const response = createResponse(messages, {
+            
+            // Prepare response data
+            const responseData = {
               mode: parsedResponse.mode,
               intent: parsedResponse.intent,
               confidence: parsedResponse.confidence,
               sessionId: sessionId,
-              processing: "background_job_queued",
+              processing: pythonApiResult?.success ? "processed" : "background_job_queued",
               classification: classification,
               routing: routing
-            });
+            };
+
+            // Add taskData if tasks were created (regardless of Python API result)
+            if (parsedResponse.taskAction?.action === "create" && parsedResponse.taskAction?.tasks?.length > 0) {
+              responseData.taskData = {
+                operation: 'create',
+                tasks: parsedResponse.taskAction.tasks,
+                count: parsedResponse.taskAction.tasks.length,
+                displayType: 'toast' // Hint for FE to show as toast
+              };
+              
+              console.log(`📋 Adding taskData to response: ${parsedResponse.taskAction.tasks.length} tasks created`);
+            }
+
+            const response = createResponse(messages, responseData);
             
             res.send(response);
 
@@ -297,8 +358,9 @@ export class ChatController {
    * @param {Object} classification - Intent classification
    * @param {Object} routing - Routing decision
    * @param {Object} res - Express response object
+   * @param {Object} userContext - User context including timezone
    */
-  async handleTaskOperations(userMessage, sessionId, userId, classification, routing, res) {
+  async handleTaskOperations(userMessage, sessionId, userId, classification, routing, res, userContext = {}) {
     try {
       console.log(`🔧 Handling task operations for user: ${userId}`);
       
@@ -310,7 +372,8 @@ export class ChatController {
       const operationResponse = await this.taskOperationService.processTaskOperation(
         userMessage, 
         taskData.tasks, 
-        sessionId
+        sessionId,
+        userContext
       );
       
       console.log(`🎯 Operation: ${operationResponse.operation}, Needs confirmation: ${operationResponse.needsConfirmation}`);
@@ -347,7 +410,8 @@ export class ChatController {
       // Execute operation immediately if no confirmation needed
       const executionResult = await this.taskOperationService.executeTaskOperation(
         operationResponse.taskOperation, 
-        userId
+        userId,
+        userContext
       );
       
       console.log(`✅ Operation executed:`, executionResult.success ? 'Success' : 'Failed');
@@ -358,8 +422,9 @@ export class ChatController {
       if (executionResult.success) {
         // Add success message based on operation type
         const successMessage = this.createOperationSuccessMessage(
-          operationResponse.operation, 
-          executionResult
+          executionResult.operation, 
+          executionResult,
+          executionResult.count
         );
         resultMessages = [...resultMessages, successMessage];
       } else {
@@ -389,8 +454,8 @@ export class ChatController {
       if (operationResponse.operation === 'query' && executionResult.success && executionResult.results) {
         responseData.taskData = {
           operation: 'query',
-          tasks: executionResult.results,
-          count: executionResult.count,
+          tasks: operationResponse.tasks,
+          count: operationResponse.tasks.length,
           filters: executionResult.filters,
           displayType: 'toast' // Hint for FE to show as toast
         };
@@ -441,11 +506,11 @@ export class ChatController {
    * @param {Object} result - Execution result
    * @returns {Object} - Success message
    */
-  createOperationSuccessMessage(operation, result) {
+  createOperationSuccessMessage(operation, result, numOfTask) {
     switch (operation) {
       case 'query':
         return {
-          text: `✅ Tìm thấy ${result.count} tasks phù hợp với yêu cầu của bạn.`,
+          text: `✅ Tìm thấy ${numOfTask} tasks phù hợp với yêu cầu của bạn.`,
           facialExpression: "smile",
           animation: "Talking_0"
         };
@@ -490,8 +555,9 @@ export class ChatController {
    * @param {string} sessionId - Session ID
    * @param {string} userId - User ID
    * @param {Object} res - Express response object
+   * @param {Object} userContext - User context including timezone
    */
-  async handleTaskOperationConfirmation(userMessage, pendingConfirmation, sessionId, userId, res) {
+  async handleTaskOperationConfirmation(userMessage, pendingConfirmation, sessionId, userId, res, userContext = {}) {
     try {
       console.log(`🔧 Handling task operation confirmation: ${pendingConfirmation.operation}`);
       
@@ -509,7 +575,8 @@ export class ChatController {
       // Execute the confirmed operation
       const executionResult = await this.taskOperationService.executeTaskOperation(
         operationData.taskOperation, 
-        userId
+        userId,
+        userContext
       );
       
       console.log(`✅ Confirmed operation executed:`, executionResult.success ? 'Success' : 'Failed');
