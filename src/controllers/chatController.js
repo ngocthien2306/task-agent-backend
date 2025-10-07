@@ -3,6 +3,7 @@ import { IntentClassifier } from "../services/intentClassifier.js";
 import { ConversationService } from "../services/conversationService.js";
 import { TaskOperationService } from "../services/taskOperationService.js";
 import { createResponse, createIntroMessages, createErrorMessage } from "../utils/responseHelper.js";
+import { subscriptionMiddleware } from "../middleware/subscriptionMiddleware.js";
 import config from "../config/index.js";
 
 export class ChatController {
@@ -11,6 +12,33 @@ export class ChatController {
     this.intentClassifier = new IntentClassifier();
     this.conversationService = new ConversationService();
     this.taskOperationService = new TaskOperationService();
+  }
+
+  /**
+   * Track token usage after successful OpenAI request
+   * @param {string} userId - User ID
+   * @param {string} sessionId - Session ID  
+   * @param {Object} tokenUsage - Token usage from OpenAI
+   */
+  async trackTokenUsage(userId, sessionId, tokenUsage) {
+    try {
+      const result = await subscriptionMiddleware.trackTokenUsage(userId, sessionId, tokenUsage, {
+        request_type: 'chat',
+        model_used: config.openai.model,
+        endpoint: '/chat'
+      });
+      
+      if (result.success) {
+        console.log(`✅ Token usage tracked for user ${userId}: ${tokenUsage.total_tokens} tokens, Cost: ${result.cost_vnd || 0} VND`);
+      } else {
+        console.log(`⚠️ Token tracking failed: ${result.error}`);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error(`❌ Error in token tracking: ${error.message}`);
+      throw error;
+    }
   }
 
   /**
@@ -113,6 +141,15 @@ export class ChatController {
               let finalResponse;
               try {
                 finalResponse = await this.conversationService.processConversation(combinedInput, sessionId, userId, userContext);
+                
+                // Track token usage for confirmation if available
+                if (finalResponse.tokenUsage && userId !== 'anonymous') {
+                  try {
+                    await this.trackTokenUsage(userId, sessionId, finalResponse.tokenUsage);
+                  } catch (tokenError) {
+                    console.error(`⚠️ Confirmation token tracking failed but continuing:`, tokenError.message);
+                  }
+                }
               } catch (error) {
                 console.log(`⚠️ OpenAI failed for confirmation, using merged pending data`);
                 finalResponse = this.conversationService.mergeConfirmationData(userMessage, pendingConfirmation);
@@ -175,6 +212,15 @@ export class ChatController {
             // ===== NORMAL CONVERSATION PROCESSING =====
             // Process conversation with OpenAI, including userId for task fetching and userContext from FE
             const parsedResponse = await this.conversationService.processConversation(userMessage, sessionId, userId, userContext);
+            
+            // Track token usage if available
+            if (parsedResponse.tokenUsage && userId !== 'anonymous') {
+              try {
+                await this.trackTokenUsage(userId, sessionId, parsedResponse.tokenUsage);
+              } catch (tokenError) {
+                console.error(`⚠️ Token tracking failed but continuing:`, tokenError.message);
+              }
+            }
             
             // Extract messages
             let messages = parsedResponse.messages || [parsedResponse];

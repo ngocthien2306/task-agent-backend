@@ -299,7 +299,8 @@ Khi process-conversation, nếu user input có thông tin mơ hồ, PHẢI hỏi
         "category": "learning",
         "dueDate": "${currentDate}",
         "dueTime": "09:00",
-        "tags": ["deep-learning", "theory", "goodfellow"]
+        "tags": ["deep-learning", "theory", "goodfellow"],
+        "referenceLinks": [try to give me some references]
       },
       {
         "title": "Hoàn thành CS231n course - Lecture 1-5", 
@@ -308,7 +309,9 @@ Khi process-conversation, nếu user input có thông tin mơ hồ, PHẢI hỏi
         "category": "learning",
         "dueDate": "${tomorrow}",
         "dueTime": "10:00",
-        "tags": ["cs231n", "stanford", "cnn"]
+        "tags": ["cs231n", "stanford", "cnn"],
+        "referenceLinks": [try to give me some references]
+
       },
       {
         "title": "Code Neural Network from scratch với Python",
@@ -323,7 +326,9 @@ Khi process-conversation, nếu user input có thông tin mơ hồ, PHẢI hỏi
           "Implement forward propagation",
           "Implement backpropagation và gradient descent",
           "Test và optimize neural network"
-        ]
+        ],
+        "referenceLinks": [try to give me some references]
+
       }
     ]
   },
@@ -909,23 +914,18 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
     });
 
     // Use provided userContext from FE, or fetch if not provided
-    if (!userContext.timezone && userId) {
-      userContext = await this.fetchUserProfile(userId);
-      console.log(`🌍 Fetched user timezone: ${userContext.timezone}`);
-    } else if (userContext.timezone) {
-      console.log(`🌍 Using provided user timezone: ${userContext.timezone}`);
-    }
+
     
     // Fetch existing tasks if userId provided and it's a task/scheduling related intent
     let existingTasksContext = "";
-    if (userId && (userMessage.includes('task') || userMessage.includes('lịch') || userMessage.includes('meeting') || userMessage.includes('sắp xếp'))) {
-      const taskData = await this.fetchUserTasks(userId);
-      if (taskData.tasks.length > 0) {
-        existingTasksContext = `\n\n📋 EXISTING TASKS (${taskData.count} total):\n${JSON.stringify(taskData.tasks, null, 2)}\n\n⚠️ IMPORTANT: Check for time conflicts and duplicate tasks before creating new ones!`;
-      } else {
-        existingTasksContext = "\n\n📋 EXISTING TASKS: No existing tasks found.";
-      }
+
+    const taskData = await this.fetchUserTasks(userId);
+    if (taskData.tasks.length > 0) {
+      existingTasksContext = `\n\n📋 EXISTING TASKS (${taskData.count} total):\n${JSON.stringify(taskData.tasks, null, 2)}\n\n⚠️ IMPORTANT: Check for time conflicts and duplicate tasks before creating new ones!`;
+    } else {
+      existingTasksContext = "\n\n📋 EXISTING TASKS: No existing tasks found.";
     }
+    
     
     // Update system prompt with fresh date/time before AI call
     this.updateSystemPrompt(sessionId, userContext);
@@ -959,8 +959,15 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
       const aiResponseRaw = completion.choices[0].message.content;
       console.log(`🔍 Raw ChatGPT response:`, aiResponseRaw);
       
+      // Extract token usage information
+      const tokenUsage = completion.usage || {};
+      console.log(`📊 Token usage:`, tokenUsage);
+      
       const parsedResponse = JSON.parse(aiResponseRaw);
       console.log(`📋 Parsed taskAction:`, JSON.stringify(parsedResponse.taskAction, null, 2));
+      
+      // Add token usage to response
+      parsedResponse.tokenUsage = tokenUsage;
       
       // Add AI response to conversation history
       this.addMessageToSession(sessionId, {
