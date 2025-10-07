@@ -94,6 +94,7 @@ Chủ nhật: ${thisSunday}
 📋 OUTPUT FORMAT (chỉ JSON, không text khác):
 👤 STYLE: ${userContext.communication_style || 'friendly'} tone, ${userContext.interaction_preference || 'detailed'} responses
 
+Lúc nào cũng phải trả ra format như bên dưới
 
 {
   "operation": "query|update|delete|priority_change|mark_complete|stats",
