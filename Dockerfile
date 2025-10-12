@@ -1,11 +1,13 @@
 # Task Agent Backend Dockerfile (Node.js)
-FROM node:18-alpine
+FROM node:18-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install ffmpeg and required dependencies
-RUN apk add --no-cache ffmpeg
+# Install ffmpeg and required dependencies for Rhubarb
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package.json yarn.lock ./
@@ -16,8 +18,9 @@ RUN yarn install --production
 # Copy application code
 COPY . .
 
-# Create audios directory
-RUN mkdir -p audios
+# Create audios directory and ensure rhubarb binary has execute permission
+RUN mkdir -p audios && \
+    chmod +x bin/rhubarb
 
 # Expose port
 EXPOSE 3000
