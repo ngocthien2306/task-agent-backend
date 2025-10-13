@@ -80,7 +80,7 @@ export const generateLipSync = async (fileBaseName) => {
   } else if (platform === 'darwin') {
     // For MacOS with arm64 - need to install softwareupdate --install-rosetta
     await execCommand(
-      `arch -x86_64 ./bin/rhubarb -f json -o ${jsonPath} ${wavPath} -r phonetic`
+      `arch -x86_64 ./bin_mac/rhubarb -f json -o ${jsonPath} ${wavPath} -r phonetic`
     );
   } else {
     // For Linux or other platforms, try the Linux version

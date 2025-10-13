@@ -1,6 +1,8 @@
 .env
 node_modules
-bin
+bin_mac
 rhubarb_window
 audios
-rhubarb
+rhubarb_window
+bin
+bin_linux
