@@ -73,7 +73,7 @@ export const generateLipSync = async (fileBaseName) => {
   if (platform === 'win32') {
     // For Windows
     const currentDir = process.cwd();
-    const rhubarbPath = path.join(currentDir, 'rhubarb', 'rhubarb.exe');
+    const rhubarbPath = path.join(currentDir, 'rhubarb_window', 'rhubarb.exe');
     await execCommand(
       `"${rhubarbPath}" -f json -o ${jsonPath} ${wavPath} -r phonetic`
     );
