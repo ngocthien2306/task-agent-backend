@@ -20,7 +20,7 @@ app.use(cors());
 const port = 3000;
 
 // Python API endpoint for database operations
-const PYTHON_API_URL = process.env.PYTHON_API_URL || "http://localhost:8000";
+const PYTHON_API_URL = process.env.PYTHON_API_URL || "https://task-agent-api.ngrok.dev";
 
 app.get("/", (req, res) => {
   res.send("AI Work Assistant Server is running!");

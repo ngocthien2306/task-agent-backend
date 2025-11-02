@@ -28,7 +28,7 @@ export class ConversationService {
     });
 
     // Handle timezone-aware dates
-    const userTimezone = userContext.timezone || 'UTC';
+    const userTimezone = "Asia/Ho_Chi_Minh"; // userContext.timezone || 'UTC';
     let today, currentDate, currentTime, tomorrow;
     let thisMonday, thisTuesday, thisWednesday, thisThursday, thisFriday, thisSaturday, thisSunday;
     

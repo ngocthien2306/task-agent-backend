@@ -17,7 +17,7 @@ export const config = {
   
   // Python API configuration
   pythonApi: {
-    url: process.env.PYTHON_API_URL || "http://localhost:8000",
+    url: "https://task-agent-api.ngrok.dev",
     timeout: 10000
   },
   

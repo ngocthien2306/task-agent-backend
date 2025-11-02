@@ -15,7 +15,7 @@ export class TaskOperationService {
    */
   getTaskOperationPrompt(userContext = {}) {
 
-    const userTimezone = userContext.timezone || 'UTC';
+    const userTimezone = "Asia/Ho_Chi_Minh";
     let today, currentDate, currentTime, tomorrow;
     let thisMonday, thisTuesday, thisWednesday, thisThursday, thisFriday, thisSaturday, thisSunday;
     
