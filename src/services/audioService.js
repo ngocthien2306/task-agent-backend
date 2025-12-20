@@ -64,8 +64,16 @@ export class AudioService {
       const fileName = `${config.audio.outputDir}/${fileBaseName}.${config.audio.formats.input}`;
       const textInput = message.text;
       
-      // Ensure textInput is a string
-      const textString = typeof textInput === 'string' ? textInput : String(textInput || '');
+      // Ensure textInput is a string and has content
+      const textString = typeof textInput === 'string' ? textInput.trim() : String(textInput || '').trim();
+      
+      // Skip audio generation if text is empty
+      if (!textString || textString.length === 0) {
+        console.warn(`⚠️ Skipping audio generation for ${fileBaseName}: empty text`);
+        message.audio = "";
+        message.lipsync = { metadata: { duration: 0 }, mouthCues: [] };
+        return message;
+      }
       
       console.log(`🎵 Generating audio for ${fileBaseName}: "${textString.substring(0, 50)}..."`);
       

@@ -117,8 +117,10 @@ ${this.getCompactStyleGuide(userContext.interaction_preference, userContext)}
 
 📋 OUTPUT JSON: {mode, intent, confidence, needsConfirmation, messages: [{text, facialExpression, animation}], taskAction: {action, tasks: [{title, description, priority, category, dueDate, dueTime, status, tags, subtasks, reminders}]}, schedulingAction}
 
-⚠️ CRITICAL: 
-- ALWAYS include both taskAction and schedulingAction in response, even if action is "none"
+⚠️ CRITICAL - ABSOLUTELY REQUIRED IN EVERY RESPONSE: 
+- **messages**: REQUIRED! ALWAYS include messages array with at least 1 message object containing text, facialExpression, and animation
+- **taskAction**: REQUIRED! ALWAYS include taskAction (use "action": "none" if no task action)
+- **schedulingAction**: REQUIRED! ALWAYS include schedulingAction (use "type": "none", "action": "none" if no scheduling)
 - For learning plans: ALWAYS create MULTIPLE tasks (3-5 tasks) in tasks array
 - ALWAYS include dueDate and dueTime for each task (use ${currentDate}, ${tomorrow}, weekdays: ${thisMonday}-${thisSunday}) hãy tính toán ngày cho đúng
 - ALWAYS include relevant referenceLinks for tasks that benefit from additional resources (learning, work, research, health, shopping, etc.) with real, helpful URLs, ít nhất 2 tài liệu tham khảo
@@ -965,6 +967,40 @@ Khi có existing tasks trong context, PHẢI kiểm tra:
       
       const parsedResponse = JSON.parse(aiResponseRaw);
       console.log(`📋 Parsed taskAction:`, JSON.stringify(parsedResponse.taskAction, null, 2));
+      
+      // ===== VALIDATION: Ensure messages field exists =====
+      if (!parsedResponse.messages || !Array.isArray(parsedResponse.messages) || parsedResponse.messages.length === 0) {
+        console.warn(`⚠️ ChatGPT response missing messages array, generating default message`);
+        
+        // Generate default message based on mode and intent
+        let defaultText = "Đã xử lý yêu cầu của bạn.";
+        let defaultExpression = "smile";
+        let defaultAnimation = "Talking_1";
+        
+        if (parsedResponse.mode === "simple_task" && parsedResponse.taskAction?.action === "create") {
+          const taskCount = parsedResponse.taskAction.tasks?.length || 0;
+          if (taskCount > 1) {
+            defaultText = `Tôi đã tạo ${taskCount} tasks cho kế hoạch của bạn! Hãy cố gắng hoàn thành nhé! 🎯`;
+            defaultExpression = "smile";
+            defaultAnimation = "Celebrating";
+          } else if (taskCount === 1) {
+            defaultText = `Đã tạo task "${parsedResponse.taskAction.tasks[0]?.title || 'mới'}" thành công! ✅`;
+            defaultExpression = "smile";
+            defaultAnimation = "Talking_2";
+          }
+        } else if (parsedResponse.mode === "scheduling") {
+          defaultText = "Đã sắp xếp lịch trình cho bạn! 📅";
+          defaultExpression = "smile";
+          defaultAnimation = "Talking_1";
+        }
+        
+        // Set default messages
+        parsedResponse.messages = [{
+          text: defaultText,
+          facialExpression: defaultExpression,
+          animation: defaultAnimation
+        }];
+      }
       
       // Add token usage to response
       parsedResponse.tokenUsage = tokenUsage;
